@@ -419,17 +419,39 @@
             border-radius: 10px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             transition: all 0.3s;
+            cursor: pointer;  /* Added: Make cursor pointer */
+            border: 2px solid transparent;  /* Added: For hover effect */
         }
 
         .welcome-screen .feature-card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 12px rgba(139, 0, 0, 0.15);  /* Changed: Red shadow on hover */
+            border-color: var(--spicmacay-light);  /* Added: Border on hover */
+        }
+
+        .welcome-screen .feature-card:active {
+            transform: translateY(-2px);  /* Added: Click effect */
         }
 
         .welcome-screen .feature-card i {
             font-size: 2rem;
             color: var(--spicmacay-red);
             margin-bottom: 10px;
+            transition: all 0.3s;  /* Added: Icon animation */
+        }
+
+        .welcome-screen .feature-card:hover i {
+            transform: scale(1.1);  /* Added: Icon grows on hover */
+        }
+
+        .welcome-screen .feature-card h5 {
+            margin: 10px 0;
+            color: var(--spicmacay-dark);
+        }
+
+        .welcome-screen .feature-card p {
+            margin: 0;
+            font-size: 0.9rem;
         }
 
         /* Toast styles */
@@ -508,17 +530,18 @@
                     <p>I'm here to help you with event registration and information about SPIC MACAY activities.</p>
                     
                     <div class="feature-grid">
-                        <div class="feature-card">
+                        <!-- Clickable Feature Cards -->
+                        <div class="feature-card" onclick="startWithMessage('I want to register a new event')" title="Click to register an event">
                             <i class="fas fa-calendar-plus"></i>
                             <h5>Register Events</h5>
                             <p>Create and manage SPIC MACAY events</p>
                         </div>
-                        <div class="feature-card">
+                        <div class="feature-card" onclick="startWithMessage('Tell me about SPIC MACAY')" title="Click to learn more">
                             <i class="fas fa-info-circle"></i>
                             <h5>Get Information</h5>
                             <p>Ask about events, venues, and more</p>
                         </div>
-                        <div class="feature-card">
+                        <div class="feature-card" onclick="startWithMessage('What can you help me with?')" title="Click to see what I can do">
                             <i class="fas fa-robot"></i>
                             <h5>Smart Assistant</h5>
                             <p>AI-powered intelligent responses</p>

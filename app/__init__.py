@@ -80,10 +80,14 @@ def create_app(config=None):
     # ========================================
     app.logger.info("Initializing database connection...")
     from app.models.database import DatabaseManager
+    from app.models.database import DatabaseValidator
     
     try:
         db_manager = DatabaseManager(app.config['DB_CONFIG'])
+        db_validator = DatabaseValidator(db_manager)
         app.db_manager = db_manager
+        app.db_validator = db_validator
+        
         app.logger.info("Database connected successfully")
     except Exception as e:
         app.logger.error(f"Database connection failed: {e}")
@@ -133,6 +137,7 @@ def create_app(config=None):
         agent = ConversationalAgent(
             api_key=app.config['OPENAI_API_KEY'],
             db_manager=db_manager,
+            db_validator=db_validator,
             event_service=event_service,
             notification_service=notification_service
         )

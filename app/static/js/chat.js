@@ -7,9 +7,10 @@
 class ChatInterface {
     constructor() {
         this.isWaitingForResponse = false;
-        this.apiBaseUrl = '/api/agent';  // Updated to new agent endpoint
+        this.apiBaseUrl = '/api/agent';
         this.conversationInitialized = false;
         this.currentAgentType = null;
+        this.firstMessageSent = false;  // Track if user has sent first message
         
         this.messageInput = document.getElementById('user-input');
         this.sendButton = document.getElementById('send-button');
@@ -23,7 +24,7 @@ class ChatInterface {
     init() {
         console.log('[ChatInterface] Initializing...');
         
-        // Initialize chat session
+        // Initialize chat session but dont show greeting yet
         this.startSession();
         
         // Event listeners
@@ -65,12 +66,18 @@ class ChatInterface {
                 this.conversationInitialized = true;
                 console.log('[ChatInterface] ✅ Conversation started successfully');
                 
-                // Remove welcome screen and show greeting
-                this.removeWelcomeScreen();
-                this.displayMessage(data.response, 'bot', data.agent_type);
+                // DON'T remove welcome screen yet
+                // DON'T display greeting message yet
+                // Just mark conversation as ready
                 
-                // Show agent type indicator
-                this.showAgentIndicator(data.agent_type);
+                // Store the greeting for later (when user sends first message)
+                this.initialGreeting = {
+                    response: data.response,
+                    agent_type: data.agent_type
+                };
+                
+                console.log('[ChatInterface] Welcome screen will remain until first user message');
+                
             } else {
                 console.error('[ChatInterface] ❌ Failed to start:', data.error);
                 this.showError('Failed to start chat session: ' + (data.error || 'Unknown error'));
@@ -100,8 +107,23 @@ class ChatInterface {
         
         console.log('[ChatInterface] Sending message:', message);
         
-        // Remove welcome screen if visible
-        this.removeWelcomeScreen();
+        // If this is the first message, remove welcome screen and show greeting
+        if (!this.firstMessageSent) {
+            console.log('[ChatInterface] First message - removing welcome screen');
+            this.removeWelcomeScreen();
+            
+            // Show the initial greeting now
+            if (this.initialGreeting) {
+                this.displayMessage(
+                    this.initialGreeting.response,
+                    'bot',
+                    this.initialGreeting.agent_type
+                );
+                this.showAgentIndicator(this.initialGreeting.agent_type);
+            }
+            
+            this.firstMessageSent = true;
+        }
         
         // Display user message
         this.displayMessage(message, 'user');
@@ -194,6 +216,12 @@ class ChatInterface {
     }
     
     displayMessage(text, sender, agentType = null) {
+        console.log('[displayMessage] Called with:', {
+            sender,
+            agentType,
+            textPreview: text.substring(0, 100)
+        });
+        
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${sender}`;
         
@@ -276,7 +304,7 @@ class ChatInterface {
     }
     
     showAgentIndicator(agentType) {
-        // Optional: Show which agent is currently active
+        // Show which agent is currently active
         const indicator = document.getElementById('agent-indicator');
         if (indicator) {
             if (agentType === 'event_creation') {
@@ -304,6 +332,7 @@ class ChatInterface {
     removeWelcomeScreen() {
         const welcomeScreen = document.getElementById('welcome-screen');
         if (welcomeScreen) {
+            console.log('[ChatInterface] Removing welcome screen');
             welcomeScreen.remove();
         }
     }
@@ -389,6 +418,38 @@ async function resetChat() {
             if (data.success) {
                 // Clear messages
                 window.chatInterface.chatMessages.innerHTML = '';
+                
+                // Re-add welcome screen
+                const welcomeScreen = document.createElement('div');
+                welcomeScreen.id = 'welcome-screen';
+                welcomeScreen.className = 'welcome-screen';
+                welcomeScreen.innerHTML = `
+                    <h3>Welcome to SPIC MACAY Event Assistant! 🎵</h3>
+                    <p>I'm here to help you with event registration and information about SPIC MACAY activities.</p>
+                    
+                    <div class="feature-grid">
+                        <div class="feature-card">
+                            <i class="fas fa-calendar-plus"></i>
+                            <h5>Register Events</h5>
+                            <p>Create and manage SPIC MACAY events</p>
+                        </div>
+                        <div class="feature-card">
+                            <i class="fas fa-info-circle"></i>
+                            <h5>Get Information</h5>
+                            <p>Ask about events, venues, and more</p>
+                        </div>
+                        <div class="feature-card">
+                            <i class="fas fa-robot"></i>
+                            <h5>Smart Assistant</h5>
+                            <p>AI-powered intelligent responses</p>
+                        </div>
+                    </div>
+                `;
+                window.chatInterface.chatMessages.appendChild(welcomeScreen);
+                
+                // Reset first message flag
+                window.chatInterface.firstMessageSent = false;
+                
                 console.log('[Global] ✅ Chat reset successfully');
                 
                 // Restart conversation
@@ -439,6 +500,16 @@ async function checkAgentStatus() {
         const data = await response.json();
         console.log('[Global] Agent status:', data);
         
+        // Show status in alert or modal
+        const statusMessage = `
+Agent Status:
+- Initialized: ${data.initialized ? 'Yes' : 'No'}
+- Current Mode: ${data.agent_type || 'None'}
+- Messages: ${data.message_count || 0}
+        `.trim();
+        
+        alert(statusMessage);
+        
         return data;
     } catch (error) {
         console.error('[Global] ❌ Error checking status:', error);
@@ -450,4 +521,5 @@ async function checkAgentStatus() {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('[Global] DOM loaded, initializing chat interface...');
     window.chatInterface = new ChatInterface();
+    console.log('[Global] Chat interface ready. Welcome screen visible. Waiting for user input.');
 });

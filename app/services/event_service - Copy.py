@@ -2,7 +2,6 @@
 """
 Event Management Service
 """
-
 from typing import Dict, List, Optional
 from datetime import datetime
 import uuid
@@ -18,6 +17,141 @@ class EventService:
         self.db = db_manager
         logger.info("EventService initialized with database connection")
     
+    # def create_event(self, event_data: Dict, created_by: str = 'chatbot') -> Dict:
+    #     """Create new event and APR entry"""
+    #     conn = None
+    #     try:
+    #         conn = self.db_manager.get_connection()
+    #         cursor = conn.cursor()
+            
+    #         # Start transaction
+    #         conn.start_transaction()
+            
+    #         # Determine financial year
+    #         event_date = datetime.strptime(event_data['event_date'], '%Y-%m-%d')
+    #         if event_date.month >= 4:
+    #             fy = f"{event_date.year}-{event_date.year + 1}"
+    #         else:
+    #             fy = f"{event_date.year - 1}-{event_date.year}"
+            
+    #         # Get institution and artist details
+    #         cursor.execute(
+    #             "SELECT institution_name FROM institution_list WHERE sid = %s",
+    #             (event_data['institution_id'],)
+    #         )
+    #         inst_result = cursor.fetchone()
+    #         institution_name = inst_result[0] if inst_result else ''
+            
+    #         cursor.execute(
+    #             "SELECT name FROM artists_list WHERE tid = %s",
+    #             (event_data['artist_id'],)
+    #         )
+    #         artist_result = cursor.fetchone()
+    #         artist_name = artist_result[0] if artist_result else ''
+            
+    #         # Insert into event_list
+    #         event_query = """
+    #             INSERT INTO event_list (
+    #                 title, start_date, end_date, event_time, event_category,
+    #                 state, city, institution, artist, venue,
+    #                 attendees, budget, added_by, added_date, updated_date,
+    #                 event_status, status, fy, chapter
+    #             ) VALUES (
+    #                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+    #                 %s, %s, %s, %s, %s, %s, %s, %s, %s
+    #             )
+    #         """
+            
+    #         event_title = f"{event_data.get('event_module', 'Event')} - {artist_name}"
+    #         current_date = datetime.now().strftime('%Y-%m-%d')
+            
+    #         event_values = (
+    #             event_title,
+    #             event_data['event_date'],
+    #             event_data['event_date'],
+    #             event_data.get('event_time', ''),
+    #             event_data.get('event_module', ''),
+    #             event_data['state'],
+    #             event_data['city'],
+    #             str(event_data['institution_id']),
+    #             str(event_data['artist_id']),
+    #             event_data.get('venue', ''),
+    #             event_data.get('attendees', ''),
+    #             event_data.get('budget', 0),
+    #             created_by,
+    #             current_date,
+    #             current_date,
+    #             'Pending',
+    #             1,
+    #             fy,
+    #             event_data.get('chapter', '')
+    #         )
+            
+    #         cursor.execute(event_query, event_values)
+    #         event_id = cursor.lastrowid
+            
+    #         # Create APR payment request
+    #         request_id = self._generate_request_id()
+    #         custom_apr = f"APR-{event_id}-{datetime.now().strftime('%Y%m%d')}"
+            
+    #         apr_query = """
+    #             INSERT INTO apr_payment_request (
+    #                 request_id, artist_id, event_id, custom_apr,
+    #                 event_date, time_duration, institution, chapter,
+    #                 students, fc, created_by, dt_created, del, updated_by
+    #             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s)
+    #         """
+            
+    #         apr_values = (
+    #             request_id,
+    #             str(event_data['artist_id']),
+    #             str(event_id),
+    #             custom_apr,
+    #             event_data['event_date'],
+    #             event_data.get('event_time', ''),
+    #             institution_name,
+    #             event_data.get('chapter', ''),
+    #             event_data.get('attendees', ''),
+    #             '',  # fc field
+    #             created_by,
+    #             current_date,
+    #             created_by
+    #         )
+            
+    #         cursor.execute(apr_query, apr_values)
+            
+    #         # Commit transaction
+    #         conn.commit()
+            
+    #         logger.info(f"Event created successfully: ID={event_id}, APR={request_id}")
+            
+    #         return {
+    #             'success': True,
+    #             'event_id': event_id,
+    #             'request_id': request_id,
+    #             'custom_apr': custom_apr,
+    #             'message': 'Event created successfully',
+    #             'artist_name': artist_name,
+    #             'institution_name': institution_name,
+    #             'event_date': event_data['event_date']
+    #         }
+            
+    #     except Exception as e:
+    #         if conn:
+    #             conn.rollback()
+    #         logger.error(f"Error creating event: {e}")
+    #         return {
+    #             'success': False,
+    #             'error': str(e),
+    #             'message': f'Failed to create event: {str(e)}'
+    #         }
+    #     finally:
+    #         if conn:
+    #             cursor.close()
+    #             conn.close()
+    # Code Generated by Sidekick is for learning and experimentation purposes only.
+# Code Generated by Sidekick is for learning and experimentation purposes only.
+# Code Generated by Sidekick is for learning and experimentation purposes only.
     def create_event(self, event_data: dict) -> dict:
         """
         Create a new event
@@ -46,12 +180,12 @@ class EventService:
             else:
                 fy = f"{event_date_obj.year - 1}-{event_date_obj.year}"
             
-            # Get next ID
+            # Get next ID (since AUTO_INCREMENT isn't working)
             max_id_query = "SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM event_list"
             id_result = self.db.fetch_one(max_id_query)
             next_id = id_result['next_id'] if id_result else 1
             
-            # Insert into event_list (ONLY using existing table)
+            # NOW include 'id' in the INSERT
             query = """
             INSERT INTO event_list (
                 id, title, start_date, end_date, event_time, event_category,
@@ -68,7 +202,7 @@ class EventService:
             event_title = event_data.get('title', f"Event at {event_data.get('institution_name', 'Institution')}")
             
             values = (
-                next_id,
+                next_id,  # <-- Add the ID here
                 event_title,
                 event_date,
                 event_data.get('end_date', event_date),
@@ -92,6 +226,7 @@ class EventService:
             # Execute query
             result = self.db.execute_query(query, values, commit=True)
             
+            # Check if query was successful
             if not result or not result.get('success'):
                 error_msg = result.get('error', 'Unknown database error') if result else 'Database query failed'
                 logger.error(f"Failed to insert event: {error_msg}")
@@ -101,10 +236,12 @@ class EventService:
                     'message': f'Failed to create event: {error_msg}'
                 }
             
+            # Use the generated ID
             event_id = next_id
+            
             logger.info(f"Event created successfully with ID: {event_id}")
             
-            # Create APR automatically
+            # Try to create APR automatically
             apr_result = self.create_apr(event_id, event_data)
             
             return {
@@ -122,9 +259,10 @@ class EventService:
                 'message': f'Failed to create event: {e}'
             }
 
+# Code Generated by Sidekick is for learning and experimentation purposes only.
     def create_apr(self, event_id: int, event_data: dict) -> Optional[dict]:
         """
-        Create Artist Payment Request (APR) - ONLY using apr_payment_request table
+        Create Artist Payment Request (APR)
         
         Args:
             event_id: ID of the created event
@@ -134,20 +272,26 @@ class EventService:
             Dictionary with APR details or None if failed
         """
         try:
+            # Generate APR request ID
             event_date = event_data.get('event_date') or event_data.get('start_date', '')
             request_id = self._generate_request_id()
             custom_apr = f"APR-{event_id}-{datetime.now().strftime('%Y%m%d')}"
             
+            # Calculate payment amount (example logic)
+            base_amount = 10000  # Base payment
+            attendee_bonus = (event_data.get('attendees', 100) // 100) * 1000
+            total_amount = base_amount + attendee_bonus
+            
             current_date = datetime.now().strftime('%Y-%m-%d')
             
-            # Use ONLY apr_payment_request table (existing table)
+            # Use correct table name: apr_payment_request
             query = """
             INSERT INTO apr_payment_request (
                 request_id, artist_id, event_id, custom_apr,
-                event_date, time_duration, institution, chapter,
-                students, fc, created_by, dt_created, del, updated_by
+                event_date, time_duration, institution, 
+                students, created_by, dt_created, del, updated_by
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s
             )
             """
             
@@ -159,9 +303,7 @@ class EventService:
                 event_date,
                 event_data.get('event_time', ''),
                 event_data.get('institution_name', ''),
-                event_data.get('chapter', ''),
                 event_data.get('attendees', 100),
-                '',  # fc field
                 event_data.get('created_by', 'System'),
                 current_date,
                 event_data.get('created_by', 'System')
@@ -178,133 +320,13 @@ class EventService:
             return {
                 'request_id': request_id,
                 'custom_apr': custom_apr,
+                'amount': total_amount,
                 'status': 'Pending'
             }
             
         except Exception as e:
             logger.error(f"Error creating APR: {e}", exc_info=True)
             return None
-
-    def add_new_artist(self, artist_data: dict) -> dict:
-        """
-        Add a new artist to the database
-        
-        Args:
-            artist_data: Dictionary with artist information
-            
-        Returns:
-            Dictionary with success status and artist_id
-        """
-        try:
-            # Get next artist ID
-            max_id_query = "SELECT COALESCE(MAX(tid), 0) + 1 as next_id FROM artists_list"
-            id_result = self.db.fetch_one(max_id_query)
-            next_id = id_result['next_id'] if id_result else 1
-            
-            query = """
-            INSERT INTO artists_list (
-                tid, name, art_form, email, phone, 
-                city, state, status, added_date
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, 1, %s
-            )
-            """
-            
-            current_date = datetime.now().strftime('%Y-%m-%d')
-            
-            values = (
-                next_id,
-                artist_data.get('name'),
-                artist_data.get('art_form', 'Music'),
-                artist_data.get('email', ''),
-                artist_data.get('phone', ''),
-                artist_data.get('city', ''),
-                artist_data.get('state', ''),
-                current_date
-            )
-            
-            result = self.db.execute_query(query, values, commit=True)
-            
-            if not result or not result.get('success'):
-                return {
-                    'success': False,
-                    'error': result.get('error', 'Failed to add artist')
-                }
-            
-            logger.info(f"New artist added: {artist_data.get('name')} (ID: {next_id})")
-            
-            return {
-                'success': True,
-                'artist_id': next_id,
-                'message': f"Artist '{artist_data.get('name')}' added successfully"
-            }
-            
-        except Exception as e:
-            logger.error(f"Error adding artist: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e)
-            }
-
-    def add_new_institution(self, institution_data: dict) -> dict:
-        """
-        Add a new institution to the database
-        
-        Args:
-            institution_data: Dictionary with institution information
-            
-        Returns:
-            Dictionary with success status and institution_id
-        """
-        try:
-            # Get next institution ID
-            max_id_query = "SELECT COALESCE(MAX(sid), 0) + 1 as next_id FROM institution_list"
-            id_result = self.db.fetch_one(max_id_query)
-            next_id = id_result['next_id'] if id_result else 1
-            
-            query = """
-            INSERT INTO institution_list (
-                sid, institution_name, email, phone,
-                city, state, status, added_date
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, 1, %s
-            )
-            """
-            
-            current_date = datetime.now().strftime('%Y-%m-%d')
-            
-            values = (
-                next_id,
-                institution_data.get('name'),
-                institution_data.get('email', ''),
-                institution_data.get('phone', ''),
-                institution_data.get('city', ''),
-                institution_data.get('state', ''),
-                current_date
-            )
-            
-            result = self.db.execute_query(query, values, commit=True)
-            
-            if not result or not result.get('success'):
-                return {
-                    'success': False,
-                    'error': result.get('error', 'Failed to add institution')
-                }
-            
-            logger.info(f"New institution added: {institution_data.get('name')} (ID: {next_id})")
-            
-            return {
-                'success': True,
-                'institution_id': next_id,
-                'message': f"Institution '{institution_data.get('name')}' added successfully"
-            }
-            
-        except Exception as e:
-            logger.error(f"Error adding institution: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e)
-            }
 
     def _generate_request_id(self) -> str:
         """Generate unique request ID"""
@@ -314,7 +336,11 @@ class EventService:
     
     def get_event_details(self, event_id: int) -> Optional[Dict]:
         """Get complete event details"""
+        conn = None
         try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
             query = """
                 SELECT 
                     e.*,
@@ -334,15 +360,90 @@ class EventService:
                 WHERE e.id = %s
             """
             
-            return self.db.fetch_one(query, (event_id,))
+            cursor.execute(query, (event_id,))
+            return cursor.fetchone()
             
         except Exception as e:
             logger.error(f"Error fetching event details: {e}")
             return None
+        finally:
+            if conn:
+                cursor.close()
+                conn.close()
+    
+    
+    # Code Generated by Sidekick is for learning and experimentation purposes only.
+    def create_apr(self, event_id: int, event_data: dict) -> dict:
+        """
+        Create Artist Payment Request (APR)
+        
+        Args:
+            event_id: ID of the created event
+            event_data: Event information
+            
+        Returns:
+            Dictionary with APR details or None if failed
+        """
+        try:
+            # Generate APR request ID
+            event_date = event_data.get('event_date') or event_data.get('start_date', '')
+            request_id = f"APR-{event_id}-{event_date.replace('-', '')}"
+            
+            # Calculate payment amount (example logic)
+            base_amount = 10000  # Base payment
+            attendee_bonus = (event_data.get('attendees', 100) // 100) * 1000
+            total_amount = base_amount + attendee_bonus
+            
+            query = """
+            INSERT INTO artist_payment_requests (
+                request_id, event_id, artist_id, artist_name,
+                event_date, institution_name, city, state,
+                amount, status, created_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+            )
+            """
+            
+            values = (
+                request_id,
+                event_id,
+                event_data.get('artist_id'),
+                event_data.get('artist_name'),
+                event_date,
+                event_data.get('institution_name'),
+                event_data.get('city'),
+                event_data.get('state'),
+                total_amount,
+                'Pending'
+            )
+            
+            #cursor = self.db.cursor()
+            #cursor.execute(query, values)
+            #self.db.commit()
+            #cursor.close()
+            result = self.db.execute_query(query, values, commit=True)
+            
+            logger.info(f"APR created: {request_id}")
+            
+            return {
+                'request_id': request_id,
+                'amount': total_amount,
+                'status': 'Pending',
+                'custom_apr': f"APR-{event_id}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating APR: {e}", exc_info=True)
+            self.db.rollback()
+            return None
 
     def search_events(self, filters: Dict) -> List[Dict]:
         """Search events with filters"""
+        conn = None
         try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
             query = """
                 SELECT 
                     e.*,
@@ -382,15 +483,24 @@ class EventService:
             
             query += " ORDER BY e.start_date DESC LIMIT 50"
             
-            return self.db.fetch_all(query, tuple(params))
+            cursor.execute(query, params)
+            return cursor.fetchall()
             
         except Exception as e:
             logger.error(f"Error searching events: {e}")
             return []
-
+        finally:
+            if conn:
+                cursor.close()
+                conn.close()
+    
     def update_event_status(self, event_id: int, status: str, updated_by: str) -> bool:
         """Update event status"""
+        conn = None
         try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            
             query = """
                 UPDATE event_list 
                 SET event_status = %s, 
@@ -398,54 +508,61 @@ class EventService:
                     updated_date = %s
                 WHERE id = %s
             """
+            cursor.execute(query, (
+                status, 
+                updated_by, 
+                datetime.now().strftime('%Y-%m-%d'), 
+                event_id
+            ))
+            conn.commit()
             
-            result = self.db.execute_query(
-                query,
-                (status, updated_by, datetime.now().strftime('%Y-%m-%d'), event_id),
-                commit=True
-            )
-            
-            if result and result.get('success'):
-                logger.info(f"Event {event_id} status updated to {status}")
-                return True
-            return False
+            logger.info(f"Event {event_id} status updated to {status}")
+            return True
             
         except Exception as e:
+            if conn:
+                conn.rollback()
             logger.error(f"Error updating event status: {e}")
             return False
-
+        finally:
+            if conn:
+                cursor.close()
+                conn.close()
+    
     def get_dashboard_stats(self) -> Dict:
         """Get statistics for dashboard"""
+        conn = None
         try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
             stats = {}
             
             # Total events
-            total_query = "SELECT COUNT(*) as total FROM event_list WHERE status = 1"
-            total_result = self.db.fetch_one(total_query)
-            stats['total_events'] = total_result['total'] if total_result else 0
+            cursor.execute("SELECT COUNT(*) as total FROM event_list WHERE status = 1")
+            stats['total_events'] = cursor.fetchone()['total']
             
             # Events by status
-            status_query = """
+            cursor.execute("""
                 SELECT event_status, COUNT(*) as count 
                 FROM event_list 
                 WHERE status = 1 
                 GROUP BY event_status
-            """
-            stats['events_by_status'] = self.db.fetch_all(status_query)
+            """)
+            stats['events_by_status'] = cursor.fetchall()
             
-            # Upcoming events
-            upcoming_query = """
+            # Upcoming events (next 30 days)
+            cursor.execute("""
                 SELECT COUNT(*) as count 
                 FROM event_list 
                 WHERE status = 1 
                 AND event_status = 'Pending'
                 AND start_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-            """
-            upcoming_result = self.db.fetch_one(upcoming_query)
-            stats['upcoming_events'] = upcoming_result['count'] if upcoming_result else 0
+            """)
+            stats['upcoming_events'] = cursor.fetchone()['count']
             
             # Recent events
-            recent_query = """
+            cursor.execute("""
                 SELECT e.*, a.name as artist_name, i.institution_name
                 FROM event_list e
                 LEFT JOIN artists_list a ON e.artist = a.tid
@@ -453,22 +570,26 @@ class EventService:
                 WHERE e.status = 1
                 ORDER BY e.added_date DESC
                 LIMIT 10
-            """
-            stats['recent_events'] = self.db.fetch_all(recent_query)
+            """)
+            stats['recent_events'] = cursor.fetchall()
             
             # Events by state
-            state_query = """
+            cursor.execute("""
                 SELECT state, COUNT(*) as count
                 FROM event_list
                 WHERE status = 1
                 GROUP BY state
                 ORDER BY count DESC
                 LIMIT 10
-            """
-            stats['events_by_state'] = self.db.fetch_all(state_query)
+            """)
+            stats['events_by_state'] = cursor.fetchall()
             
             return stats
             
         except Exception as e:
             logger.error(f"Error fetching dashboard stats: {e}")
             return {}
+        finally:
+            if conn:
+                cursor.close()
+                conn.close()

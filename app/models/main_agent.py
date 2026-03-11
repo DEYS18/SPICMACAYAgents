@@ -29,7 +29,7 @@ class ConversationalAgent:
     - Maintains conversation context
     """
     
-    def __init__(self, api_key: str, db_manager, event_service, notification_service):
+    def __init__(self, api_key: str, db_manager,db_validator, event_service, notification_service):
         """
         Initialize with both specialized agents
         
@@ -44,6 +44,7 @@ class ConversationalAgent:
             self.db_manager = db_manager
             self.event_service = event_service
             self.notification_service = notification_service
+            self.db_validator=db_validator
             
             logger.info("Initializing ConversationalAgent components...")
             
@@ -52,7 +53,7 @@ class ConversationalAgent:
             self.agent = SPICMacayAgent(
                 api_key=api_key,
                 model="gpt-4o",
-                db_validator=db_manager,
+                db_validator=db_validator,
                 event_service=event_service,
                 notification_service=notification_service
             )

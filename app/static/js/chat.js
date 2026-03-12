@@ -424,26 +424,30 @@ async function resetChat() {
                 welcomeScreen.id = 'welcome-screen';
                 welcomeScreen.className = 'welcome-screen';
                 welcomeScreen.innerHTML = `
+                   
                     <h3>Welcome to SPIC MACAY Event Assistant! 🎵</h3>
-                    <p>I'm here to help you with event registration and information about SPIC MACAY activities.</p>
+                    <p>Speak or type to register events and manage activities</p>
                     
                     <div class="feature-grid">
-                        <div class="feature-card">
+                        <div class="feature-card" onclick="startWithMessage('I want to register a new event')">
                             <i class="fas fa-calendar-plus"></i>
                             <h5>Register Events</h5>
                             <p>Create and manage SPIC MACAY events</p>
                         </div>
-                        <div class="feature-card">
+                        <div class="feature-card" onclick="startWithMessage('Tell me about SPIC MACAY')">
                             <i class="fas fa-info-circle"></i>
                             <h5>Get Information</h5>
                             <p>Ask about events, venues, and more</p>
                         </div>
-                        <div class="feature-card">
+                        <div class="feature-card" onclick="startVoiceMode()" title="Click to see what I can do">
                             <i class="fas fa-robot"></i>
-                            <h5>Smart Assistant</h5>
-                            <p>AI-powered intelligent responses</p>
+                            <h5>Voice Assistant Mode</h5>
+                            <p>Speak to discuss</p>
                         </div>
                     </div>
+                </div>
+            </div>
+            
                 `;
                 window.chatInterface.chatMessages.appendChild(welcomeScreen);
                 

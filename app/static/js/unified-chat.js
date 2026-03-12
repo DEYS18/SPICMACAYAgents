@@ -594,7 +594,7 @@ function startVoiceMode() {
         }, 500);
     }
 }
-
+/*
 async function resetChat() {
     if (!window.chatInterface) return;
     
@@ -637,7 +637,7 @@ async function resetChat() {
         }
     }
 }
-
+*/
 async function checkAgentStatus() {
     try {
         const response = await fetch('/api/agent/status');

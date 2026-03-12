@@ -9,6 +9,7 @@ import os
 import logging
 from logging.handlers import RotatingFileHandler
 import traceback
+from app.services.voice_service import VoiceService  # NEW
 
 
 def create_app(config=None):
@@ -81,6 +82,8 @@ def create_app(config=None):
     app.logger.info("Initializing database connection...")
     from app.models.database import DatabaseManager
     from app.models.database import DatabaseValidator
+        # Initialize services
+    global db_manager, db_validator, event_service, notification_service, voice_service, agent
     
     try:
         db_manager = DatabaseManager(app.config['DB_CONFIG'])
@@ -112,6 +115,11 @@ def create_app(config=None):
     
     app.notification_service = None
     notification_service = None
+    
+       # Voice Service (NEW)
+    voice_service = VoiceService(app.config['OPENAI_API_KEY'])
+    app.logger.info(" Voice service initialized (OpenAI Whisper + TTS)")
+    
     # Notification Service
     #try:
     #    from app.services.notification_service import NotificationService
@@ -149,6 +157,11 @@ def create_app(config=None):
         app.logger.info("  Workflow Agent (Information Queries) - Ready")
         app.logger.info("  Agent Router (Intelligent Routing) - Ready")
         app.logger.info("AI Agent System initialized successfully")
+        
+      
+        # Schedule periodic cleanup of old voice files
+        import atexit
+        atexit.register(lambda: voice_service.cleanup_old_files(max_age_hours=24))        
         
     except Exception as e:
         app.logger.error(f"AI Agent System initialization failed: {e}")
@@ -249,6 +262,11 @@ def register_routes(app):
     except ImportError as e:
         app.logger.warning(f"Agent API blueprint not found: {e}")
         agent_bp = None
+        
+
+    from app.routes.voice_routes import voice_bp
+
+    __all__ = ['main_bp', 'agent_bp', 'voice_bp']        
     
     # ========================================
     # Register Blueprints
@@ -275,6 +293,15 @@ def register_routes(app):
     if dashboard_bp:
         app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
         app.logger.info("  Registered: /api/dashboard (Dashboard)")
+        
+        app.logger.info("  Registered: /api/agent (Unified Agent API)")
+    
+    # Events blueprint
+    if voice_bp:
+        if init_event_services:
+            init_event_services(app)
+        app.register_blueprint(voice_bp, url_prefix='/api/voice')
+        app.logger.info("  Registered: /api/voice (Voice)")        
     
     # ========================================
     # Main Application Routes

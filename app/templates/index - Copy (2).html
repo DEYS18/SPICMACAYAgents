@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPIC MACAY - Voice Assistant</title>
+    <title>SPIC MACAY - Event Registration Assistant</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -43,18 +43,18 @@
             font-weight: 700;
         }
         
-        .header-subtitle {
+        .header p {
             margin: 10px 0 0 0;
             font-size: 1.1rem;
             opacity: 0.9;
         }
-        
+
         .header-actions {
             position: absolute;
             top: 15px;
             right: 15px;
         }
-        
+
         .header-actions .btn {
             margin-left: 10px;
             background: rgba(255, 255, 255, 0.2);
@@ -65,7 +65,7 @@
             font-size: 0.85rem;
             transition: all 0.3s;
         }
-        
+
         .header-actions .btn:hover {
             background: rgba(255, 255, 255, 0.3);
             transform: translateY(-2px);
@@ -84,17 +84,17 @@
             transition: all 0.3s ease;
             z-index: 1000;
         }
-        
+
         .agent-indicator.event-mode {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
         }
-        
+
         .agent-indicator.info-mode {
             background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             color: white;
         }
-        
+
         .agent-indicator.default-mode {
             background: rgba(255, 255, 255, 0.95);
             color: #495057;
@@ -114,18 +114,23 @@
             padding: 20px;
             background: #f8f9fa;
         }
-        
+
+        /* Custom scrollbar */
         .chat-messages::-webkit-scrollbar {
             width: 8px;
         }
-        
+
         .chat-messages::-webkit-scrollbar-track {
             background: #f1f1f1;
         }
-        
+
         .chat-messages::-webkit-scrollbar-thumb {
             background: #888;
             border-radius: 4px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #555;
         }
         
         .message {
@@ -150,7 +155,7 @@
             flex-direction: row;
             text-align: left;
         }
-        
+
         .message-avatar {
             width: 36px;
             height: 36px;
@@ -161,17 +166,17 @@
             font-size: 16px;
             flex-shrink: 0;
         }
-        
+
         .message-avatar.bot-avatar {
             background: linear-gradient(135deg, var(--spicmacay-red) 0%, var(--spicmacay-light) 100%);
             color: white;
         }
-        
+
         .message-avatar.user-avatar {
             background: #6c757d;
             color: white;
         }
-        
+
         .message-content {
             flex: 1;
             max-width: 70%;
@@ -196,6 +201,14 @@
             color: #333;
             border-bottom-left-radius: 4px;
         }
+
+        .message-bubble strong {
+            font-weight: 600;
+        }
+
+        .message-bubble em {
+            font-style: italic;
+        }
         
         .message-time {
             font-size: 0.75rem;
@@ -205,7 +218,7 @@
             align-items: center;
             gap: 8px;
         }
-        
+
         .agent-label {
             display: inline-block;
             padding: 2px 8px;
@@ -214,185 +227,6 @@
             font-weight: 600;
             background: rgba(139, 0, 0, 0.1);
             color: var(--spicmacay-red);
-        }
-        
-        /* Voice Controls */
-        .voice-controls {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 20px;
-            padding: 20px;
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            border-top: 1px solid #dee2e6;
-        }
-        
-        .voice-btn {
-            width: 70px;
-            height: 70px;
-            border-radius: 50%;
-            border: none;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 28px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            position: relative;
-        }
-        
-        .voice-btn.mic-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        
-        .voice-btn.mic-btn:hover:not(:disabled) {
-            transform: scale(1.1);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-        }
-        
-        .voice-btn.mic-btn.recording {
-            animation: recordPulse 1.5s infinite;
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        }
-        
-        @keyframes recordPulse {
-            0%, 100% { 
-                transform: scale(1);
-                box-shadow: 0 4px 12px rgba(240, 147, 251, 0.4);
-            }
-            50% { 
-                transform: scale(1.15);
-                box-shadow: 0 8px 24px rgba(240, 147, 251, 0.6);
-            }
-        }
-        
-        .voice-btn.speaker-btn {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-            color: white;
-        }
-        
-        .voice-btn.speaker-btn:hover:not(:disabled) {
-            transform: scale(1.1);
-            box-shadow: 0 6px 20px rgba(79, 172, 254, 0.4);
-        }
-        
-        .voice-btn.speaker-btn.active {
-            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-        }
-        
-        .voice-btn.speaker-btn.speaking {
-            animation: speakPulse 0.5s infinite;
-        }
-        
-        @keyframes speakPulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-        }
-        
-        .voice-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .voice-status {
-            flex: 1;
-            text-align: center;
-            max-width: 400px;
-        }
-        
-        .voice-status-text {
-            font-size: 16px;
-            font-weight: 600;
-            color: #495057;
-            margin-bottom: 5px;
-        }
-        
-        .voice-status-text.active {
-            color: var(--spicmacay-red);
-        }
-        
-        .voice-status-subtext {
-            font-size: 12px;
-            color: #6c757d;
-        }
-        
-        .waveform {
-            display: none;
-            align-items: center;
-            justify-content: center;
-            gap: 3px;
-            height: 30px;
-            margin-top: 10px;
-        }
-        
-        .waveform.active {
-            display: flex;
-        }
-        
-        .waveform-bar {
-            width: 3px;
-            background: var(--spicmacay-red);
-            border-radius: 3px;
-            animation: waveAnimation 1s ease-in-out infinite;
-        }
-        
-        .waveform-bar:nth-child(2) { animation-delay: 0.1s; }
-        .waveform-bar:nth-child(3) { animation-delay: 0.2s; }
-        .waveform-bar:nth-child(4) { animation-delay: 0.3s; }
-        .waveform-bar:nth-child(5) { animation-delay: 0.4s; }
-        
-        @keyframes waveAnimation {
-            0%, 100% { height: 10px; }
-            50% { height: 25px; }
-        }
-        
-        .typing-indicator {
-            display: none;
-            padding: 10px 20px;
-        }
-        
-        .typing-indicator.active {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .typing-indicator .avatar {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--spicmacay-red) 0%, var(--spicmacay-light) 100%);
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .typing-dots {
-            background: #e9ecef;
-            padding: 12px 18px;
-            border-radius: 18px;
-            border-bottom-left-radius: 4px;
-        }
-        
-        .typing-indicator span {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            background: #6c757d;
-            border-radius: 50%;
-            margin: 0 2px;
-            animation: typing 1.4s infinite;
-        }
-        
-        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
-        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
-        
-        @keyframes typing {
-            0%, 60%, 100% { transform: translateY(0); }
-            30% { transform: translateY(-10px); }
         }
         
         .chat-input-container {
@@ -406,7 +240,7 @@
             gap: 10px;
             align-items: flex-end;
         }
-        
+
         .input-wrapper {
             flex: 1;
             position: relative;
@@ -430,7 +264,7 @@
             outline: none;
             border-color: var(--spicmacay-red);
         }
-        
+
         .char-count {
             position: absolute;
             bottom: 8px;
@@ -461,6 +295,60 @@
         .btn-send:disabled {
             background: #6c757d;
             cursor: not-allowed;
+            transform: none;
+        }
+        
+        .typing-indicator {
+            display: none;
+            padding: 10px 20px;
+            text-align: left;
+        }
+        
+        .typing-indicator.active {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .typing-indicator .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--spicmacay-red) 0%, var(--spicmacay-light) 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .typing-dots {
+            background: #e9ecef;
+            padding: 12px 18px;
+            border-radius: 18px;
+            border-bottom-left-radius: 4px;
+        }
+        
+        .typing-indicator span {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #6c757d;
+            border-radius: 50%;
+            margin: 0 2px;
+            animation: typing 1.4s infinite;
+        }
+        
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-10px); }
         }
         
         .quick-actions {
@@ -487,52 +375,6 @@
             transform: translateY(-2px);
         }
         
-        /* Welcome Screen */
-        .welcome-screen {
-            padding: 40px;
-            text-align: center;
-            color: #6c757d;
-        }
-        
-        .welcome-screen h3 {
-            color: var(--spicmacay-red);
-            margin-bottom: 20px;
-        }
-        
-        .welcome-screen .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-top: 30px;
-        }
-        
-        .welcome-screen .feature-card {
-            padding: 20px;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            transition: all 0.3s;
-            cursor: pointer;
-            border: 2px solid transparent;
-        }
-        
-        .welcome-screen .feature-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 4px 12px rgba(139, 0, 0, 0.15);
-            border-color: var(--spicmacay-light);
-        }
-        
-        .welcome-screen .feature-card i {
-            font-size: 2rem;
-            color: var(--spicmacay-red);
-            margin-bottom: 10px;
-            transition: all 0.3s;
-        }
-        
-        .welcome-screen .feature-card:hover i {
-            transform: scale(1.1);
-        }
-        
         .footer-links {
             text-align: center;
             margin-top: 20px;
@@ -551,7 +393,67 @@
             text-decoration: underline;
             color: var(--spicmacay-dark);
         }
-        
+
+        /* Welcome Screen */
+        .welcome-screen {
+            padding: 40px;
+            text-align: center;
+            color: #6c757d;
+        }
+
+        .welcome-screen h3 {
+            color: var(--spicmacay-red);
+            margin-bottom: 20px;
+        }
+
+        .welcome-screen .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .welcome-screen .feature-card {
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.3s;
+            cursor: pointer;  /* Added: Make cursor pointer */
+            border: 2px solid transparent;  /* Added: For hover effect */
+        }
+
+        .welcome-screen .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 12px rgba(139, 0, 0, 0.15);  /* Changed: Red shadow on hover */
+            border-color: var(--spicmacay-light);  /* Added: Border on hover */
+        }
+
+        .welcome-screen .feature-card:active {
+            transform: translateY(-2px);  /* Added: Click effect */
+        }
+
+        .welcome-screen .feature-card i {
+            font-size: 2rem;
+            color: var(--spicmacay-red);
+            margin-bottom: 10px;
+            transition: all 0.3s;  /* Added: Icon animation */
+        }
+
+        .welcome-screen .feature-card:hover i {
+            transform: scale(1.1);  /* Added: Icon grows on hover */
+        }
+
+        .welcome-screen .feature-card h5 {
+            margin: 10px 0;
+            color: var(--spicmacay-dark);
+        }
+
+        .welcome-screen .feature-card p {
+            margin: 0;
+            font-size: 0.9rem;
+        }
+
         /* Toast styles */
         .toast-container {
             position: fixed;
@@ -559,18 +461,50 @@
             right: 20px;
             z-index: 9999;
         }
-        
+
         /* Responsive */
         @media (max-width: 768px) {
-            .header h1 { font-size: 1.8rem; }
-            .chat-messages { height: 400px; }
-            .message-content { max-width: 85%; }
-            .voice-btn { width: 60px; height: 60px; font-size: 24px; }
+            .header h1 {
+                font-size: 1.8rem;
+            }
+
+            .header p {
+                font-size: 0.9rem;
+            }
+
+            .chat-messages {
+                height: 400px;
+            }
+
+            .message-content {
+                max-width: 85%;
+            }
+
+            .agent-indicator {
+                position: relative;
+                top: 0;
+                left: 0;
+                margin-bottom: 10px;
+                display: inline-block;
+            }
+
+            .header-actions {
+                position: relative;
+                top: 0;
+                right: 0;
+                margin-top: 15px;
+            }
+
+            .header-actions .btn {
+                display: block;
+                margin: 5px auto;
+            }
         }
     </style>
 </head>
 <body>
     <div class="main-container">
+        <!-- Agent Indicator -->
         <div id="agent-indicator" class="agent-indicator default-mode">
             <i class="fas fa-robot"></i> Assistant
         </div>
@@ -580,38 +514,41 @@
                 <button class="btn" onclick="resetChat()" title="Reset conversation">
                     <i class="fas fa-redo"></i> Reset
                 </button>
-                <button class="btn" onclick="checkAgentStatus()" title="Status">
+                <button class="btn" onclick="checkAgentStatus()" title="Check agent status">
                     <i class="fas fa-info-circle"></i> Status
                 </button>
             </div>
-            <h1>🎭 SPIC MACAY Voice Assistant</h1>
-            <p class="header-subtitle">Powered by OpenAI Whisper & GPT-4</p>
+            <h1>🎭 SPIC MACAY Assistant</h1>
+            <p>Society for the Promotion of Indian Classical Music and Culture Amongst Youth</p>
         </div>
         
         <div class="chat-container">
             <div class="chat-messages" id="chat-messages">
+                <!-- Welcome Screen (will be removed after first message) -->
                 <div id="welcome-screen" class="welcome-screen">
                     <h3>Welcome to SPIC MACAY Event Assistant! 🎵</h3>
-                    <p>Speak or type to register events and manage activities</p>
+                    <p>I'm here to help you with event registration and information about SPIC MACAY activities.</p>
                     
                     <div class="feature-grid">
-                        <div class="feature-card" onclick="startWithMessage('I want to register a new event')">
+                        <!-- Clickable Feature Cards -->
+                        <div class="feature-card" onclick="startWithMessage('I want to register a new event')" title="Click to register an event">
                             <i class="fas fa-calendar-plus"></i>
                             <h5>Register Events</h5>
-                            <p>Create and manage events</p>
+                            <p>Create and manage SPIC MACAY events</p>
                         </div>
-                        <div class="feature-card" onclick="startWithMessage('Tell me about SPIC MACAY')">
+                        <div class="feature-card" onclick="startWithMessage('Tell me about SPIC MACAY')" title="Click to learn more">
                             <i class="fas fa-info-circle"></i>
                             <h5>Get Information</h5>
-                            <p>Ask about events</p>
+                            <p>Ask about events, venues, and more</p>
                         </div>
-                        <div class="feature-card" onclick="startVoiceMode()">
-                            <i class="fas fa-microphone"></i>
-                            <h5>Voice Mode</h5>
-                            <p>Speak to register</p>
+                        <div class="feature-card" onclick="startWithMessage('What can you help me with?')" title="Click to see what I can do">
+                            <i class="fas fa-robot"></i>
+                            <h5>Smart Assistant</h5>
+                            <p>AI-powered intelligent responses</p>
                         </div>
                     </div>
                 </div>
+                <!-- Messages will be added here by JavaScript -->
             </div>
             
             <div class="typing-indicator" id="typing-indicator">
@@ -619,39 +556,10 @@
                     <i class="fas fa-robot"></i>
                 </div>
                 <div class="typing-dots">
-                    <span></span><span></span><span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
                 </div>
-            </div>
-            
-            <!-- Voice Controls -->
-            <div class="voice-controls">
-                <button class="voice-btn mic-btn" id="mic-btn" 
-                        onclick="toggleVoiceInput()" 
-                        title="Click to speak (OpenAI Whisper)">
-                    <i class="fas fa-microphone"></i>
-                </button>
-                
-                <div class="voice-status">
-                    <div class="voice-status-text" id="voice-status-text">
-                        Click microphone to speak
-                    </div>
-                    <div class="voice-status-subtext" id="voice-status-subtext">
-                        Powered by OpenAI Whisper
-                    </div>
-                    <div class="waveform" id="waveform">
-                        <div class="waveform-bar"></div>
-                        <div class="waveform-bar"></div>
-                        <div class="waveform-bar"></div>
-                        <div class="waveform-bar"></div>
-                        <div class="waveform-bar"></div>
-                    </div>
-                </div>
-                
-                <button class="voice-btn speaker-btn" id="speaker-btn" 
-                        onclick="toggleAutoSpeak()" 
-                        title="Toggle auto-speak (OpenAI TTS)">
-                    <i class="fas fa-volume-up"></i>
-                </button>
             </div>
             
             <div class="quick-actions">
@@ -665,6 +573,9 @@
                 <button class="quick-action-btn" onclick="startWithMessage('What can you help me with?')">
                     <i class="fas fa-question-circle"></i> Help
                 </button>
+                <button class="quick-action-btn" onclick="startWithMessage('Tell me about SPIC MACAY')">
+                    <i class="fas fa-info-circle"></i> About SPIC MACAY
+                </button>
             </div>
             
             <div class="chat-input-container">
@@ -672,7 +583,7 @@
                     <div class="input-wrapper">
                         <textarea 
                             id="user-input" 
-                            placeholder="Type or speak your message..." 
+                            placeholder="Type your message here..." 
                             rows="1"
                             maxlength="1000"
                         ></textarea>
@@ -698,35 +609,36 @@
         </div>
     </div>
 
-    <!-- Toast Notifications -->
-    <div class="toast-container">
-        <div id="successToast" class="toast" role="alert">
+    <!-- Success Toast -->
+    <div class="toast-container position-fixed top-0 end-0 p-3">
+        <div id="successToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
             <div class="toast-header bg-success text-white">
                 <i class="fas fa-check-circle me-2"></i>
                 <strong class="me-auto">Success</strong>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
             </div>
-            <div class="toast-body" id="successToastBody"></div>
+            <div class="toast-body" id="successToastBody">
+                <!-- Success message will be inserted here -->
+            </div>
         </div>
     </div>
 
-    <div class="toast-container">
-        <div id="errorToast" class="toast" role="alert">
+    <!-- Error Toast -->
+    <div class="toast-container position-fixed top-0 end-0 p-3">
+        <div id="errorToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
             <div class="toast-header bg-danger text-white">
                 <i class="fas fa-exclamation-circle me-2"></i>
                 <strong class="me-auto">Error</strong>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
             </div>
-            <div class="toast-body" id="errorToastBody"></div>
+            <div class="toast-body" id="errorToastBody">
+                <!-- Error message will be inserted here -->
+            </div>
         </div>
     </div>
 
+    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Load original chat.js first, then unified extension -->
     <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/unified-chat.js') }}"></script>
 </body>
 </html>
-
-
-

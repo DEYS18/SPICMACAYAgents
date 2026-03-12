@@ -797,7 +797,7 @@ Would you like to start registering a new event?"""
                 else:
                     result = {"error": f"Unknown function: {function_name}"}
                 
-                logger.error(f"Error executing function {function_name}: {result}")                    
+                logger.error(f"Result of function output {function_name}: {result}")                    
                     
             except Exception as e:
                 logger.error(f"Error executing function {function_name}: {e}")

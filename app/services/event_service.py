@@ -184,7 +184,7 @@ class EventService:
         except Exception as e:
             logger.error(f"Error creating APR: {e}", exc_info=True)
             return None
-
+    
     def add_new_artist(self, artist_data: dict) -> dict:
         """
         Add a new artist to the database
@@ -201,12 +201,22 @@ class EventService:
             id_result = self.db.fetch_one(max_id_query)
             next_id = id_result['next_id'] if id_result else 1
             
+            # Map art form category (vocal/instrumental/dance)
+            art_form_category = self._map_art_form_category(
+                artist_data.get('art_form', ''),
+                artist_data.get('art_form_category', '')
+            )
+            
+            # Generate password hash (default password)
+            default_password_hash = "$2y$10$93g2pB4rRUGUqj6Vi0SW3eYBO8MCuFhDhJ4scZs4RAbZ4iAVRKaFe"
+            
             query = """
             INSERT INTO artists_list (
-                tid, name, art_form, email, phone, 
-                city, state, status, added_date
+                tid, name, art_form, `On`, city, enter_state, 
+                email, phone, artist_type, artist_grade,
+                added_by, added_date, status, create_password
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, 1, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s
             )
             """
             
@@ -216,11 +226,16 @@ class EventService:
                 next_id,
                 artist_data.get('name'),
                 artist_data.get('art_form', 'Music'),
+                art_form_category,  # 'On' column
+                artist_data.get('city', ''),
+                artist_data.get('state', ''),  # Maps to 'enter_state'
                 artist_data.get('email', ''),
                 artist_data.get('phone', ''),
-                artist_data.get('city', ''),
-                artist_data.get('state', ''),
-                current_date
+                artist_data.get('artist_type', ''),
+                artist_data.get('artist_grade', ''),
+                'AI_Assistant',
+                current_date,
+                default_password_hash
             )
             
             result = self.db.execute_query(query, values, commit=True)
@@ -236,7 +251,10 @@ class EventService:
             return {
                 'success': True,
                 'artist_id': next_id,
-                'message': f"Artist '{artist_data.get('name')}' added successfully"
+                'artist_name': artist_data.get('name'),
+                'art_form': artist_data.get('art_form'),
+                'art_form_category': art_form_category,
+                'message': f"Artist '{artist_data.get('name')}' added successfully with ID {next_id}"
             }
             
         except Exception as e:
@@ -245,7 +263,61 @@ class EventService:
                 'success': False,
                 'error': str(e)
             }
-
+    
+    def _map_art_form_category(self, art_form: str, category: str = '') -> str:
+        """
+        Map art form to the 'On' category based on existing patterns
+        
+        Args:
+            art_form: The specific art form (e.g., "Sitar", "Bharatanatyam")
+            category: Optional explicit category
+            
+        Returns:
+            Mapped category string
+        """
+        art_form_lower = art_form.lower()
+        category_lower = category.lower()
+        
+        # Vocal instruments/forms
+        vocal_keywords = [
+            'vocal', 'voice', 'singing', 'dhrupad', 'khayal', 'thumri', 
+            'bhajan', 'ghazal', 'kirtan'
+        ]
+        
+        # Instrumental keywords
+        instrumental_keywords = [
+            'sitar', 'tabla', 'sarod', 'flute', 'bansuri', 'veena', 'violin',
+            'santoor', 'sarangi', 'shehnai', 'guitar', 'harmonium', 'mridangam',
+            'ghatam', 'pakhawaj', 'tanpura', 'rudra veena', 'surbahar',
+            'mohan veena', 'saxophone', 'nadaswaram', 'chitra veena'
+        ]
+        
+        # Dance forms
+        dance_keywords = [
+            'bharatanatyam', 'kathak', 'kathakali', 'kuchipudi', 'odissi',
+            'manipuri', 'mohiniyattam', 'sattriya', 'koodiyattam', 'dance',
+            'nritya', 'andhranatyam'
+        ]
+        
+        # Check explicit category first
+        if 'vocal' in category_lower:
+            return 'Vocal'
+        elif 'instrument' in category_lower or 'music' in category_lower:
+            return 'Instrumental'
+        elif 'dance' in category_lower:
+            return 'Dance'
+        
+        # Check art form
+        if any(keyword in art_form_lower for keyword in vocal_keywords):
+            return 'Vocal'
+        elif any(keyword in art_form_lower for keyword in instrumental_keywords):
+            return art_form  # For instruments, store the instrument name
+        elif any(keyword in art_form_lower for keyword in dance_keywords):
+            return 'Dance'
+        
+        # Default to empty or the category if provided
+        return category if category else ''
+    
     def add_new_institution(self, institution_data: dict) -> dict:
         """
         Add a new institution to the database
@@ -262,12 +334,16 @@ class EventService:
             id_result = self.db.fetch_one(max_id_query)
             next_id = id_result['next_id'] if id_result else 1
             
+            
+                        # Generate password hash (default password)
+            default_password_hash = "$2y$10$93g2pB4rRUGUqj6Vi0SW3eYBO8MCuFhDhJ4scZs4RAbZ4iAVRKaFe"
+            
             query = """
             INSERT INTO institution_list (
                 sid, institution_name, email, phone,
-                city, state, status, added_date
+                city, state, country_id, added_by, added_date, status, create_password
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, 1, %s
+                %s, %s, %s, %s,%s, %s, 1, %s, %s, 1,%s
             )
             """
             
@@ -280,7 +356,10 @@ class EventService:
                 institution_data.get('phone', ''),
                 institution_data.get('city', ''),
                 institution_data.get('state', ''),
-                current_date
+ 
+               0,
+                current_date,
+                default_password_hash
             )
             
             result = self.db.execute_query(query, values, commit=True)
@@ -296,7 +375,8 @@ class EventService:
             return {
                 'success': True,
                 'institution_id': next_id,
-                'message': f"Institution '{institution_data.get('name')}' added successfully"
+                'institution_name': institution_data.get('name'),
+                'message': f"Institution '{institution_data.get('name')}' added successfully with ID {next_id}"
             }
             
         except Exception as e:
@@ -305,6 +385,9 @@ class EventService:
                 'success': False,
                 'error': str(e)
             }
+    
+    # Keep all other methods from previous version (create_event, create_apr, etc.)
+    # ... (rest of the class remains the same)
 
     def _generate_request_id(self) -> str:
         """Generate unique request ID"""

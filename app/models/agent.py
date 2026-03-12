@@ -212,7 +212,6 @@ class SPICMacayAgent:
         6. Only after confirmation, call create_event with complete event_data
         
         		
-		
 		7. IF ARTIST WAS NOT FOUND:
 		   - Inform coordinator that artist is not in database
 		   - Ask: "Would you like me to add [Artist Name] to our directory?"
@@ -225,6 +224,71 @@ class SPICMacayAgent:
            - Refer database as directory, and if you cant add it, then mention that we will add it subsequently later             
 		   - Call add_new_artist with all details
 		   - Confirm addition before proceeding
+
+            CONVERSATION FLOW FOR NEW ARTIST REGISTRATION:
+
+            When an artist is NOT found in database:
+            1. Inform coordinator: "I couldn't find [Artist Name] in our database."
+            2. Ask: "Would you like me to add this artist? I'll need some details."
+            3. If YES, collect the following:
+
+            REQUIRED FIELDS:
+            - **Full Name**: Artist's complete name
+            - **Art Form**: Specific art form (e.g., Sitar, Bharatanatyam, Hindustani Vocal, Tabla)
+            - **Art Form Category**: 
+              * For VOCAL: Classical vocal, Dhrupad, Khayal, Ghazal, etc.
+              * For INSTRUMENTAL: The instrument name (Sitar, Tabla, Flute, etc.)
+              * For DANCE: Dance style (Bharatanatyam, Kathak, Odissi, etc.)
+            - **City**: Artist's city
+            - **State**: Artist's state
+
+            OPTIONAL FIELDS (collect if available):
+            - **Email**: Artist's email address
+            - **Phone**: Contact number
+            - **Artist Grade/Type**: A, B, B1, C, Guru, etc. (if known)
+
+            MAPPING RULES FOR ART FORM CATEGORY:
+            - If art form includes "Vocal", "Singing", "Voice", "Dhrupad" → Category: "Vocal"
+            - If art form is an instrument (Sitar, Tabla, Flute, Veena, Violin, etc.) → Category: Instrument name
+            - If art form is a dance (Bharatanatyam, Kathak, Kathakali, Kuchipudi, Odissi, Manipuri, etc.) → Category: "Dance"
+
+            EXAMPLE CONVERSATION:
+
+            User: "The artist is Pandit Shubham Sharma"
+            You: [Call search_artists("Pandit Shubham Sharma")]
+            System: [Returns empty - not found]
+            You: "I couldn't find 'Pandit Shubham Sharma' in our database. Would you like me to add this artist to our system? I'll need to collect some information:
+            - Full name
+            - Art form (e.g., Sitar, Hindustani Vocal, Tabla)
+            - Art form category (Vocal/Instrumental/Dance)
+            - City and State
+            - Email and phone (optional)"
+
+            User: "Yes, add him. He plays Sitar, based in Mumbai, Maharashtra. Email is shubham@music.com, phone 9876543210"
+
+            You: "Perfect! Let me confirm:
+            - Name: Pandit Shubham Sharma
+            - Art Form: Sitar
+            - Category: Instrumental
+            - City: Mumbai
+            - State: Maharashtra
+            - Email: shubham@music.com
+            - Phone: 9876543210
+
+            Should I add this artist?"
+
+            User: "Yes"
+            You: [Call add_new_artist with all details]
+            System: [Returns success with artist_id]
+            You: "Great! I've added Pandit Shubham Sharma to our artist database (ID: 1234). Now let's continue with the event details..."
+
+            INSTITUTION NOT FOUND - SIMILAR FLOW:
+
+            If institution not found:
+            1. Inform: "I couldn't find [Institution Name] in database"
+            2. Ask: "Would you like to add this institution?"
+            3. Collect: Name, City, State, Email, Phone
+
 
 		8. IF INSTITUTION NOT FOUND:
 		   - Inform coordinator that institution is not in database
@@ -240,6 +304,8 @@ class SPICMacayAgent:
 
         IMPORTANT RULES:
         - Always collect ALL required fields before calling create_event
+        - Always search database FIRST before asking to add    
+        - After adding artist/institution, use the returned ID for event creation
         - Use search_artists to find and verify artist information
         - Use search_institutions to find and verify institution information
         - Store information as you collect it and reference it back to the user
@@ -527,32 +593,64 @@ Would you like to start registering a new event?"""
                     }
                 },
                 
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "add_new_artist",
-                        "description": "Add a new artist to the database after coordinator confirmation. Use this when an artist is not found in the search.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "artist_data": {
-                                    "type": "object",
-                                    "description": "Artist information to add",
-                                    "properties": {
-                                        "name": {"type": "string", "description": "Artist full name"},
-                                        "art_form": {"type": "string", "description": "Art form (e.g., Sitar, Bharatanatyam)"},
-                                        "email": {"type": "string", "description": "Artist email"},
-                                        "phone": {"type": "string", "description": "Artist phone number"},
-                                        "city": {"type": "string", "description": "Artist city"},
-                                        "state": {"type": "string", "description": "Artist state"}
-                                    },
-                                    "required": ["name", "art_form"]
-                                }
-                            },
-                            "required": ["artist_data"]
+                # Code Generated by Sidekick is for learning and experimentation purposes only.
+
+{
+    "type": "function",
+    "function": {
+        "name": "add_new_artist",
+        "description": "Add a new artist to the database after coordinator confirmation. Collects name, art form, category, location and contact details.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "artist_data": {
+                    "type": "object",
+                    "description": "Complete artist information",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Artist full name (REQUIRED)"
+                        },
+                        "art_form": {
+                            "type": "string",
+                            "description": "Specific art form - e.g., 'Sitar', 'Hindustani Vocal', 'Bharatanatyam', 'Tabla' (REQUIRED)"
+                        },
+                        "art_form_category": {
+                            "type": "string",
+                            "description": "Category: 'Vocal' for vocal arts, instrument name for instrumental, 'Dance' for dance forms (REQUIRED)"
+                        },
+                        "city": {
+                            "type": "string",
+                            "description": "Artist's city (REQUIRED)"
+                        },
+                        "state": {
+                            "type": "string",
+                            "description": "Artist's state (REQUIRED)"
+                        },
+                        "email": {
+                            "type": "string",
+                            "description": "Artist email (optional)"
+                        },
+                        "phone": {
+                            "type": "string",
+                            "description": "Artist phone number (optional)"
+                        },
+                        "artist_grade": {
+                            "type": "string",
+                            "description": "Artist grade: A, B, B1, C, Guru, etc. (optional)"
+                        },
+                        "artist_type": {
+                            "type": "string",
+                            "description": "Artist type classification (optional)"
                         }
-                    }
-                },
+                    },
+                    "required": ["name", "art_form", "art_form_category", "city", "state"]
+                }
+            },
+            "required": ["artist_data"]
+        }
+    }
+},
                 {
                     "type": "function",
                     "function": {

@@ -15,6 +15,7 @@ mysql-connector-python
 mysql
 openai==1.6.1
 Werkzeug==3.0.1
+waitress
 
 
 # OpenAI SDK and Dependencies

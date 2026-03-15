@@ -897,6 +897,52 @@ Would you like to start registering a new event?"""
                 apr_data = self.event_service.create_apr(event_id, db_event_data)
                 if apr_data:
                     logger.info(f"APR created: {apr_data.get('request_id')}")
+                
+
+
+       # ✅ NEW: Send email notification after APR creation
+                try:
+                    # Prepare notification data with ALL required fields
+                    notification_data = {
+                        'event_id': event_id,
+                        'request_id': apr_data.get('request_id'),
+                        'custom_apr': apr_data.get('custom_apr', 'N/A'),
+                        'title': db_event_data.get('title'),
+                        'module_name': db_event_data.get('module_name'),
+                        'artist_name': db_event_data.get('artist_name'),
+                        'art_form': db_event_data.get('art_form'),
+                        'start_date': db_event_data.get('event_date'),
+                        'event_time': db_event_data.get('event_time'),
+                        'institution_name': db_event_data.get('institution_name'),
+                        'venue': db_event_data.get('venue'),
+                        'city': db_event_data.get('city'),
+                        'state': db_event_data.get('state'),
+                        'attendees': db_event_data.get('attendees')
+                    }
+                    
+                    # Get notification recipient from environment or config
+                    # You can set this in your config file or environment variable
+                    recipient_email = self.notification_service.smtp_config.get(
+                        'notification_recipient', 
+                        'smhighereducation@spicmacay.com'  # Default fallback
+                    )
+                    
+                    # Send notification
+                    notification_sent = self.notification_service.send_event_confirmation(
+                        notification_data,
+                        [recipient_email]  # Send to single email
+                    )
+                    
+                    if notification_sent:
+                        logger.info(f" Email notification sent to {recipient_email}")
+                    else:
+                        logger.warning(f" Failed to send email notification to {recipient_email}")
+                        
+                except Exception as email_error:
+                    logger.error(f" Email notification error: {email_error}")
+                    # Don't fail the entire operation if email fails
+                    notification_sent = False
+
             except Exception as apr_error:
                 logger.warning(f"APR creation error: {apr_error}")
             

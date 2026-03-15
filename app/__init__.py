@@ -121,17 +121,17 @@ def create_app(config=None):
     app.logger.info(" Voice service initialized (OpenAI Whisper + TTS)")
     
     # Notification Service
-    #try:
-    #    from app.services.notification_service import NotificationService
-    #    notification_service = NotificationService(app.config['SMTP_CONFIG'])
-    #    app.notification_service = notification_service
-    #    app.logger.info("  Notification Service initialized")
-    #except Exception as e:
-    #    app.logger.error(f"Notification Service initialization failed: {e}")
-    #    app.logger.error(f"Full traceback: {traceback.format_exc()}")
-    #    # Don't fail on notification service - it's not critical
-    #    app.notification_service = None
-    #    app.logger.warning("  Notification Service disabled due to initialization error")
+    try:
+        from app.models.notifications import NotificationService
+        notification_service = NotificationService(app.config['SMTP_CONFIG'])
+        app.notification_service = notification_service
+        app.logger.info("  Notification Service initialized")
+    except Exception as e:
+        app.logger.error(f"Notification Service initialization failed: {e}")
+        app.logger.error(f"Full traceback: {traceback.format_exc()}")
+        # Don't fail on notification service - it's not critical
+        app.notification_service = None
+        app.logger.warning("  Notification Service disabled due to initialization error")
     
     # ========================================
     # STEP 5: Initialize AI Agent System

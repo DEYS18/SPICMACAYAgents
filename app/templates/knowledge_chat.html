@@ -1,0 +1,325 @@
+<!-- Interactive guide chat (RAG agent) with mentor figure. Added by Claude for SPIC MACAY Agents. -->
+{% set avatar_url = url_for('static', filename=guide_photo) if guide_photo
+    else (url_for('static', filename=agent.guide_avatar) if (agent.guide_avatar is defined and agent.guide_avatar) else '') %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ agent.title }} - SPIC MACAY</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+    <style>
+        :root { --spicmacay-red:#8B0000; --spicmacay-dark:#660000; --spicmacay-light:#DC143C; }
+        body { font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;
+            background:linear-gradient(135deg,#f5f7fa 0%,#c3cfe2 100%); min-height:100vh; padding:20px; }
+        .main-container { max-width:900px; margin:0 auto; }
+        .header { background:linear-gradient(135deg,var(--spicmacay-red) 0%,var(--spicmacay-light) 100%);
+            color:white; padding:24px 30px; border-radius:15px 15px 0 0; position:relative; }
+        .header .back { position:absolute; top:18px; left:20px; color:white; text-decoration:none; opacity:0.9; font-size:0.9rem; }
+        .header .reset { position:absolute; top:14px; right:18px; background:rgba(255,255,255,0.2);
+            border:1px solid rgba(255,255,255,0.3); color:white; padding:7px 14px; border-radius:20px; font-size:0.82rem; cursor:pointer; }
+        .header h1 { margin:6px 0 0 0; font-size:1.7rem; font-weight:700; text-align:center; }
+        .header .tagline { margin:6px 0 0 0; text-align:center; opacity:0.92; font-size:0.95rem; }
+
+        .chat-container { background:white; border-radius:0 0 15px 15px; box-shadow:0 4px 6px rgba(0,0,0,0.1); overflow:hidden; }
+
+        /* Guide hero */
+        .guide-hero { display:flex; align-items:center; gap:18px; padding:22px 24px;
+            background:linear-gradient(135deg,#fff6ef 0%,#fdeede 100%); border-bottom:1px solid #f0e2d2; }
+        .guide-hero img { width:84px; height:84px; border-radius:50%; flex-shrink:0;
+            box-shadow:0 3px 10px rgba(139,0,0,0.18); object-fit:cover; background:#fff; }
+        .guide-hero .ghead { font-weight:700; color:var(--spicmacay-red); font-size:1.05rem; }
+        .guide-hero .gsub { color:#6b6b6b; font-size:0.9rem; margin-top:3px; }
+
+        .chat-messages { height:420px; overflow-y:auto; padding:22px; background:#f8f9fa; }
+        .message { margin-bottom:18px; display:flex; gap:10px; align-items:flex-start; animation:fadeIn .3s ease-in; }
+        @keyframes fadeIn { from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);} }
+        .message.user { flex-direction:row-reverse; }
+        .avatar { width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+            flex-shrink:0; color:white; overflow:hidden; }
+        .avatar img { width:100%; height:100%; object-fit:cover; }
+        .avatar.bot { background:linear-gradient(135deg,var(--spicmacay-red) 0%,var(--spicmacay-light) 100%); }
+        .avatar.user { background:#6c757d; }
+        .bubble-wrap { max-width:74%; }
+        .bubble { padding:12px 17px; border-radius:18px; line-height:1.6; word-wrap:break-word; }
+        .message.bot .bubble { background:#e9ecef; color:#333; border-bottom-left-radius:4px; }
+        .message.user .bubble { background:var(--spicmacay-red); color:white; border-bottom-right-radius:4px; white-space:pre-wrap; }
+
+        /* Markdown rendering inside bot bubbles */
+        .message.bot .bubble p { margin:0 0 8px; }
+        .message.bot .bubble p:last-child { margin-bottom:0; }
+        .message.bot .bubble ul, .message.bot .bubble ol { margin:6px 0 10px 18px; padding:0; }
+        .message.bot .bubble li { margin-bottom:4px; }
+        .message.bot .bubble h1,.message.bot .bubble h2,.message.bot .bubble h3 {
+            font-size:1rem; font-weight:700; margin:12px 0 6px; color:var(--spicmacay-red); }
+        .message.bot .bubble strong { font-weight:700; }
+        .message.bot .bubble em { font-style:italic; }
+        .message.bot .bubble code { background:rgba(0,0,0,0.07); padding:1px 5px; border-radius:4px; font-size:0.88em; }
+        .message.bot .bubble blockquote { border-left:3px solid var(--spicmacay-red); margin:8px 0; padding:4px 12px; opacity:0.85; }
+        .message.bot .bubble hr { border:none; border-top:1px solid #ccc; margin:10px 0; }
+        .message.bot .bubble table { border-collapse:collapse; width:100%; font-size:0.88em; margin:8px 0; }
+        .message.bot .bubble th { background:rgba(139,0,0,0.1); padding:5px 8px; text-align:left; }
+        .message.bot .bubble td { padding:4px 8px; border-bottom:1px solid #ddd; }
+        .sources { margin-top:7px; font-size:0.74rem; color:#6c757d; }
+        .sources .tag { display:inline-block; background:rgba(139,0,0,0.08); color:var(--spicmacay-red);
+            padding:2px 9px; border-radius:10px; margin:2px 4px 0 0; }
+        .sources .tag.linked { background:rgba(139,0,0,0.14); border:1px solid rgba(139,0,0,0.3); }
+        .sources .tag a { color:var(--spicmacay-red); text-decoration:underline; font-weight:600;
+            display:inline-flex; align-items:center; gap:3px; }
+        .sources .tag a:hover { color:var(--spicmacay-dark); text-decoration:underline; }
+        /* Download bar shown when agent generates a document */
+        .download-bar { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+        .btn-dl { display:inline-flex; align-items:center; gap:5px; padding:6px 14px;
+            border-radius:20px; font-size:0.82rem; font-weight:600; cursor:pointer; border:none;
+            transition:all .2s; }
+        .btn-dl.word { background:#1a73e8; color:white; }
+        .btn-dl.word:hover { background:#1557b0; }
+        .btn-dl.pdf  { background:var(--spicmacay-red); color:white; }
+        .btn-dl.pdf:hover  { background:var(--spicmacay-dark); }
+        .btn-dl:disabled { opacity:0.6; cursor:not-allowed; }
+
+        /* Starter prompt chips */
+        .starters { padding:0 22px 8px; display:flex; flex-wrap:wrap; gap:8px; background:#f8f9fa; }
+        .starter-chip { background:white; border:1px solid var(--spicmacay-red); color:var(--spicmacay-red);
+            border-radius:20px; padding:8px 14px; font-size:0.85rem; cursor:pointer; transition:all .2s; }
+        .starter-chip:hover { background:var(--spicmacay-red); color:white; }
+
+        .typing { display:none; padding:6px 22px 14px; color:#6c757d; font-size:0.85rem; background:#f8f9fa; }
+        .typing.active { display:block; }
+        .input-bar { padding:18px; background:white; border-top:1px solid #dee2e6; display:flex; gap:10px; }
+        #user-input { flex:1; padding:12px 18px; border:2px solid #dee2e6; border-radius:25px; font-size:1rem; resize:none; min-height:50px; max-height:120px; }
+        #user-input:focus { outline:none; border-color:var(--spicmacay-red); }
+        .btn-send { padding:12px 26px; background:var(--spicmacay-red); color:white; border:none; border-radius:25px; font-weight:600; cursor:pointer; height:50px; }
+        .btn-send:hover:not(:disabled){ background:var(--spicmacay-dark); }
+        .btn-send:disabled { background:#6c757d; cursor:not-allowed; }
+        @media(max-width:600px){ .guide-hero img{ width:64px; height:64px; } }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="header">
+            <a class="back" href="/"><i class="fas fa-arrow-left"></i> All agents</a>
+            <button class="reset" onclick="resetChat()"><i class="fas fa-redo"></i> Reset</button>
+            <h1><i class="fas {{ agent.icon }}"></i> {{ agent.title }}</h1>
+            <p class="tagline">{{ agent.tagline }}</p>
+        </div>
+        <div class="chat-container">
+            {% if avatar_url %}
+            <div class="guide-hero">
+                <img src="{{ avatar_url }}" alt="Guide">
+                <div>
+                    <div class="ghead">{{ agent.guide_name if agent.guide_name is defined else 'Your Guide' }}</div>
+                    <div class="gsub">A friendly guide to walk you through, step by step. Ask a question below, or tap one to start.</div>
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="chat-messages" id="messages"></div>
+
+            {% if agent.starter_prompts is defined and agent.starter_prompts %}
+            <div class="starters" id="starters">
+                {% for p in agent.starter_prompts %}
+                <button class="starter-chip" onclick="ask(this.textContent)">{{ p }}</button>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="typing" id="typing"><i class="fas fa-circle-notch fa-spin"></i> Looking through the documents…</div>
+            <div class="input-bar">
+                <textarea id="user-input" rows="1" placeholder="Ask about {{ agent.name }}…" maxlength="1000"></textarea>
+                <button class="btn-send" id="send-btn" onclick="send()"><i class="fas fa-paper-plane"></i> Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const AGENT_KEY = "{{ agent.key }}";
+        const API = "/api/knowledge/" + AGENT_KEY;
+        const AVATAR_URL = "{{ avatar_url }}";   // empty string if none
+        const messagesEl = document.getElementById('messages');
+        const inputEl = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        const typingEl = document.getElementById('typing');
+        const startersEl = document.getElementById('starters');
+
+        function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+        // Render markdown safely for bot messages
+        function renderMarkdown(text){
+            if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') return escapeHtml(text);
+            return DOMPurify.sanitize(marked.parse(text));
+        }
+
+        function botAvatarHtml(){
+            return AVATAR_URL
+                ? '<div class="avatar bot"><img src="' + AVATAR_URL + '" alt="Guide"></div>'
+                : '<div class="avatar bot"><i class="fas fa-robot"></i></div>';
+        }
+
+        // Tracks the content + title of the last bot message for download
+        let _lastDocContent = '';
+        let _lastDocTitle   = 'SPIC MACAY Convention Guide Response';
+
+        function addMessage(text, who, sources, docMeta){
+            const wrap = document.createElement('div');
+            wrap.className = 'message ' + who;
+
+            // ── Avatar ───────────────────────────────────────────────────────
+            const avatarDiv = document.createElement('div');
+            avatarDiv.innerHTML = who === 'bot' ? botAvatarHtml()
+                : '<div class="avatar user"><i class="fas fa-user"></i></div>';
+            wrap.appendChild(avatarDiv.firstChild);
+
+            // ── Bubble wrapper ───────────────────────────────────────────────
+            const bubbleWrap = document.createElement('div');
+            bubbleWrap.className = 'bubble-wrap';
+
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            if (who === 'bot') {
+                bubble.innerHTML = renderMarkdown(text);   // safe — DOMPurify'd
+            } else {
+                bubble.textContent = text;
+            }
+            bubbleWrap.appendChild(bubble);
+
+            // ── Sources ──────────────────────────────────────────────────────
+            if (sources && sources.length) {
+                const srcDiv = document.createElement('div');
+                srcDiv.className = 'sources';
+                srcDiv.innerHTML = '<i class="fas fa-book-open" style="margin-right:4px;"></i>Sources: ';
+                sources.forEach(s => {
+                    const name = (typeof s === 'object') ? s.name : s;
+                    const url  = (typeof s === 'object') ? (s.url || '') : '';
+                    const chip = document.createElement('span');
+                    if (url) {
+                        chip.className = 'tag linked';
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                        a.innerHTML = '<i class="fas fa-external-link-alt" style="font-size:0.7em;margin-right:3px;"></i>'
+                            + escapeHtml(name);
+                        chip.appendChild(a);
+                    } else {
+                        chip.className = 'tag';
+                        chip.textContent = '📄 ' + name;
+                    }
+                    srcDiv.appendChild(chip);
+                });
+                bubbleWrap.appendChild(srcDiv);
+            }
+
+            // ── Download bar — every bot response ────────────────────────────
+            if (who === 'bot') {
+                const dlTitle = (docMeta && docMeta.doc_title) || _lastDocTitle || 'Convention_Guide_Response';
+                const dlBar = document.createElement('div');
+                dlBar.className = 'download-bar';
+
+                const btnWord = document.createElement('button');
+                btnWord.className = 'btn-dl word';
+                btnWord.innerHTML = '<i class="fas fa-file-word"></i> Download as Word';
+                btnWord.addEventListener('click', function(){ downloadDoc('docx', dlTitle, this); });
+
+                const btnPdf = document.createElement('button');
+                btnPdf.className = 'btn-dl pdf';
+                btnPdf.innerHTML = '<i class="fas fa-file-pdf"></i> Download as PDF';
+                btnPdf.addEventListener('click', function(){ downloadDoc('pdf', dlTitle, this); });
+
+                dlBar.appendChild(btnWord);
+                dlBar.appendChild(btnPdf);
+                bubbleWrap.appendChild(dlBar);
+            }
+
+            wrap.appendChild(bubbleWrap);
+            messagesEl.appendChild(wrap);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        async function downloadDoc(fmt, title, btn){
+            if (!_lastDocContent){ alert('No response content to download yet.'); return; }
+            btn.disabled = true;
+            const origHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating…';
+            try {
+                const r = await fetch(API + '/download-doc', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ title: title, content: _lastDocContent, format: fmt })
+                });
+                if (!r.ok){ alert('Download failed — please try again.'); return; }
+                const blob = await r.blob();
+                const objUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = objUrl;
+                a.download = title.replace(/[^a-zA-Z0-9_\-]/g,'_') + (fmt === 'pdf' ? '.pdf' : '.docx');
+                document.body.appendChild(a); a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(objUrl);
+            } catch(e){
+                alert('Download error: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+            }
+        }
+
+        function setBusy(b){ sendBtn.disabled = b; typingEl.classList.toggle('active', b); }
+        function hideStarters(){ if (startersEl) startersEl.style.display = 'none'; }
+
+        function ask(text){ inputEl.value = text; send(); }
+
+        async function send(){
+            const text = inputEl.value.trim();
+            if (!text) return;
+            hideStarters();
+            addMessage(text, 'user');
+            inputEl.value = '';
+            setBusy(true);
+            try {
+                const r = await fetch(API + '/chat', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ message: text })
+                });
+                const d = await r.json();
+                const reply = d.response && d.response.trim()
+                    ? d.response
+                    : (d.success === false ? (d.error || 'Something went wrong. Please try again.') : 'I found documents but couldn\'t generate a response. Could you rephrase your question?');
+                // Always keep the latest bot reply available for download
+                _lastDocContent = reply;
+                _lastDocTitle   = (d.doc_title) ? d.doc_title
+                    : (text.length < 80 ? text.replace(/[^a-zA-Z0-9 ]/g,'').trim() : 'Convention_Guide_Response')
+                    || 'Convention_Guide_Response';
+                addMessage(reply, 'bot', d.sources, d);
+            } catch(e){
+                addMessage('Network error. Please try again.', 'bot');
+            } finally { setBusy(false); }
+        }
+
+        async function resetChat(){
+            await fetch(API + '/reset', { method:'POST' });
+            messagesEl.innerHTML = '';
+            if (startersEl) startersEl.style.display = 'flex';
+            start();
+        }
+
+        async function start(){
+            try {
+                const r = await fetch(API + '/start', { method:'POST' });
+                const d = await r.json();
+                addMessage(d.response, 'bot');
+            } catch(e){
+                addMessage('Welcome! Ask me a question to begin.', 'bot');
+            }
+        }
+
+        inputEl.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }
+        });
+        start();
+    </script>
+</body>
+</html>

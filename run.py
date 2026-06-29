@@ -38,7 +38,7 @@ from waitress import serve
 app = create_app()
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
+    port = int(os.getenv('PORT', 10000))
     debug = os.getenv('DEBUG', 'False').lower() == 'true'
     
     print("=" * 60)

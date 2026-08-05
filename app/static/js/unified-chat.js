@@ -9,7 +9,7 @@ class UnifiedChatInterface extends ChatInterface {
         super();
         
         // Voice-specific properties
-        this.voiceApiBaseUrl = '/api/voice';
+        this.voiceApiBaseUrl = (window.APP_ROOT || '') + '/api/voice';
         this.mediaRecorder = null;
         this.audioChunks = [];
         this.isRecording = false;
@@ -479,79 +479,14 @@ class UnifiedChatInterface extends ChatInterface {
         }
     }
     
-    // Keep your existing sendMessage function unchanged
-    async sendMessage() {
-        const message = this.messageInput.value.trim();
-        
-        if (!message || this.isWaitingForResponse) return;
-        
-        if (!this.conversationInitialized) {
-            console.error('[UnifiedChat] No active conversation');
-            this.showError('Chat not initialized. Please refresh.');
-            return;
-        }
-        
-        console.log('[UnifiedChat] Sending:', message);
-        
-        if (!this.firstMessageSent) {
-            console.log('[UnifiedChat] First message');
-            this.removeWelcomeScreen();
-            
-            if (this.initialGreeting) {
-                this.displayMessage(this.initialGreeting.response, 'bot', this.initialGreeting.agent_type);
-                this.showAgentIndicator(this.initialGreeting.agent_type);
-            }
-            
-            this.firstMessageSent = true;
-        }
-        
-        this.displayMessage(message, 'user');
-        this.messageInput.value = '';
-        this.messageInput.style.height = 'auto';
-        this.updateCharCount();
-        
-        this.showTypingIndicator();
-        this.isWaitingForResponse = true;
-        this.sendButton.disabled = true;
-        
-        if (this.micBtn) this.micBtn.disabled = true;
-        
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/chat`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message })
-            });
-            
-            const data = await response.json();
-            this.hideTypingIndicator();
-            
-            if (data.success) {
-                this.currentAgentType = data.agent_type;
-                this.displayMessage(data.response, 'bot', data.agent_type);
-                this.showAgentIndicator(data.agent_type);
-                
-                if (this.autoSpeak && data.response) {
-                    await this.speakText(data.response);
-                }
-                
-                if (data.agent_type === 'event_creation' && data.event_created) {
-                    this.showSuccessNotification('Event created!');
-                }
-            } else {
-                this.displayMessage(data.response || 'Error occurred', 'bot', 'error');
-            }
-        } catch (error) {
-            console.error('[UnifiedChat] Error:', error);
-            this.hideTypingIndicator();
-            this.displayMessage('Connection error', 'bot', 'error');
-        } finally {
-            this.isWaitingForResponse = false;
-            this.sendButton.disabled = false;
-            
-            if (this.micBtn) this.micBtn.disabled = false;
-            
-            this.messageInput.focus();
+    // sendMessage() is inherited from ChatInterface (poster upload, event photos, and
+    // PDF-download-button support all live there). Voice-specific behavior (auto-speak)
+    // hooks in via _afterBotResponse() instead of re-implementing the whole method here —
+    // a previous version duplicated sendMessage() entirely and silently drifted out of
+    // sync with poster/photo/PDF-download features added to the parent.
+    async _afterBotResponse(data) {
+        if (this.autoSpeak && data.response) {
+            await this.speakText(data.response);
         }
     }
 }
@@ -605,7 +540,7 @@ async function resetChat() {
                 window.chatInterface.currentAudio = null;
             }
             
-            const response = await fetch('/api/agent/reset', {
+            const response = await fetch((window.APP_ROOT || '') + '/api/agent/reset', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -640,7 +575,7 @@ async function resetChat() {
 */
 async function checkAgentStatus() {
     try {
-        const response = await fetch('/api/agent/status');
+        const response = await fetch((window.APP_ROOT || '') + '/api/agent/status');
         const data = await response.json();
         alert(`Agent Status:\n${JSON.stringify(data, null, 2)}`);
         return data;

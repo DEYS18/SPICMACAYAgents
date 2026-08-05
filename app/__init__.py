@@ -5,11 +5,37 @@ Integrated with Multi-Agent System
 """
 from flask import Flask, render_template
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 import logging
 from logging.handlers import RotatingFileHandler
 import traceback
 from app.services.voice_service import VoiceService  # NEW
+
+
+class SubPathFallbackMiddleware:
+    """
+    Makes the app aware it's mounted under a URL sub-path behind a reverse proxy —
+    e.g. https://spicmacay.in/spicmacay_ai_agent/New_AI_Portal/ proxied through to this
+    app running on its own port. Without this, url_for() (static assets, redirects)
+    generates root-relative URLs like /static/js/chat.js, which 404 once a proxy prefix
+    is involved, because the browser resolves them against the domain root instead of
+    the proxied path.
+
+    Only takes effect if SCRIPT_NAME hasn't already been set by ProxyFix from an
+    X-Forwarded-Prefix header sent by the proxy — so a properly configured proxy always
+    takes precedence, and this is purely a fallback for when it isn't (e.g. a plain
+    path-stripping ProxyPass with no custom headers). Configure the sub-path via the
+    URL_PREFIX env var, e.g. URL_PREFIX=/spicmacay_ai_agent/New_AI_Portal
+    """
+    def __init__(self, wsgi_app, fallback_prefix: str = ''):
+        self.wsgi_app = wsgi_app
+        self.fallback_prefix = fallback_prefix.rstrip('/')
+
+    def __call__(self, environ, start_response):
+        if self.fallback_prefix and not environ.get('SCRIPT_NAME'):
+            environ['SCRIPT_NAME'] = self.fallback_prefix
+        return self.wsgi_app(environ, start_response)
 
 
 def create_app(config=None):
@@ -28,7 +54,19 @@ def create_app(config=None):
     """
     
     app = Flask(__name__)
-    
+
+    # ========================================
+    # STEP 0: Reverse-proxy / sub-path awareness
+    # ========================================
+    # Behind a reverse proxy (e.g. https://spicmacay.in/spicmacay_ai_agent/New_AI_Portal/),
+    # the app needs to know its own URL prefix, or url_for()-generated links (static assets,
+    # redirects) come out root-relative and 404. ProxyFix picks this up automatically from
+    # standard X-Forwarded-* headers when the proxy sends them; SubPathFallbackMiddleware
+    # covers the common case where the proxy just strips the prefix and forwards the rest
+    # with no special headers — set URL_PREFIX in the environment to match.
+    app.wsgi_app = SubPathFallbackMiddleware(app.wsgi_app, fallback_prefix=os.getenv('URL_PREFIX', ''))
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
     # ========================================
     # STEP 1: Load Configuration
     # ========================================
@@ -48,14 +86,29 @@ def create_app(config=None):
     }
     
     # SMTP Configuration
+    _apr_cc_raw = os.getenv('APR_CC_RECIPIENTS', 'smhighereducation@spicmacay.com')
+    _apr_cc_list = [e.strip() for e in _apr_cc_raw.split(',') if e.strip()]
     app.config['SMTP_CONFIG'] = {
         'host': os.getenv('SMTP_HOST', 'smtp.gmail.com'),
         'port': int(os.getenv('SMTP_PORT', 587)),
         'user': os.getenv('SMTP_USER', ''),
         'password': os.getenv('SMTP_PASSWORD', ''),
-        'from_email': os.getenv('FROM_EMAIL', 'noreply@spicmacay.org')
+        'from_email': os.getenv('FROM_EMAIL', 'noreply@spicmacay.org'),
+        'apr_cc_recipients': _apr_cc_list,   # list; add more in APR_CC_RECIPIENTS env var
+        # SPIC MACAY's own collection bank account — what host institutions pay their program
+        # contribution INTO (distinct from artist payout bank details). Defaults match the
+        # sample Request for Payment documents; override per-chapter via env vars.
+        'sm_bank_config': {
+            'bank_name':      os.getenv('SM_BANK_NAME', 'State Bank of India'),
+            'account_name':   os.getenv('SM_BANK_ACCOUNT_NAME', 'SPIC MACAY'),
+            'account_number': os.getenv('SM_BANK_ACCOUNT_NO', '10773571902'),
+            'ifsc_code':      os.getenv('SM_BANK_IFSC', 'SBIN0011781'),
+        },
+        # Optional feedback-form URL for payment reminder emails — left blank until the real
+        # form link is provided; that line is simply omitted from the email if unset.
+        'feedback_form_url': os.getenv('FEEDBACK_FORM_URL', ''),
     }
-    
+
     # OpenAI Configuration
     app.config['OPENAI_API_KEY'] = os.getenv('OPENAI_API_KEY', '')
     app.config['OPENAI_MODEL'] = os.getenv('OPENAI_MODEL', 'gpt-4o')

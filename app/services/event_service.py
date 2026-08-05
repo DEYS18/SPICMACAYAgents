@@ -49,24 +49,31 @@ class EventService:
             # Get next ID
             max_id_query = "SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM event_list"
             id_result = self.db.fetch_one(max_id_query)
-            next_id = id_result['next_id'] if id_result else 1
+            next_id = int(id_result['next_id']) if id_result else 1
             
             # Insert into event_list (ONLY using existing table)
             query = """
             INSERT INTO event_list (
                 id, title, start_date, end_date, event_time, event_category,
-                state, city, institution, artist, venue,
+                state, city, institution, artist, accompanying_artist, venue,
                 attendees, budget, added_by, added_date, updated_date,
                 event_status, status, fy
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             """
-            
+
             current_date = datetime.now().strftime('%Y-%m-%d')
             event_title = event_data.get('title', f"Event at {event_data.get('institution_name', 'Institution')}")
-            
+
+            # Format accompanying_artists (list of {name, art_form}) into a display string
+            accompanying_artists = event_data.get('accompanying_artists') or []
+            accompanying_artist_str = ', '.join(
+                f"{a.get('name', '').strip()} ({a.get('art_form', '').strip()})".strip()
+                for a in accompanying_artists if a.get('name')
+            )[:255]  # column is varchar(255)
+
             values = (
                 next_id,
                 event_title,
@@ -78,6 +85,7 @@ class EventService:
                 event_data.get('city', ''),
                 str(event_data.get('institution_id', '')),
                 str(event_data.get('artist_id', '')),
+                accompanying_artist_str,
                 event_data.get('venue', event_data.get('institution_name', '')),
                 event_data.get('attendees', 100),
                 event_data.get('budget', 0),
@@ -103,15 +111,11 @@ class EventService:
             
             event_id = next_id
             logger.info(f"Event created successfully with ID: {event_id}")
-            
-            # Create APR automatically
-            apr_result = self.create_apr(event_id, event_data)
-            
+
             return {
                 'success': True,
                 'event_id': event_id,
-                'message': f'Event created with ID: {event_id}',
-                'apr': apr_result
+                'message': f'Event created with ID: {event_id}'
             }
             
         except Exception as e:
@@ -139,19 +143,26 @@ class EventService:
             custom_apr = f"APR-{event_id}-{datetime.now().strftime('%Y%m%d')}"
             
             current_date = datetime.now().strftime('%Y-%m-%d')
-            
+
+            # apr_payment_request.id has no default value — generate next id explicitly
+            max_id_result = self.db.fetch_one(
+                "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM apr_payment_request"
+            )
+            next_apr_id = int(max_id_result['next_id']) if max_id_result else 1
+
             # Use ONLY apr_payment_request table (existing table)
             query = """
             INSERT INTO apr_payment_request (
-                request_id, artist_id, event_id, custom_apr,
+                id, request_id, artist_id, event_id, custom_apr,
                 event_date, time_duration, institution, chapter,
                 students, fc, created_by, dt_created, del, updated_by
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s
             )
             """
-            
+
             values = (
+                next_apr_id,
                 request_id,
                 str(event_data.get('artist_id', '')),
                 str(event_id),
@@ -199,7 +210,7 @@ class EventService:
             # Get next artist ID
             max_id_query = "SELECT COALESCE(MAX(tid), 0) + 1 as next_id FROM artists_list"
             id_result = self.db.fetch_one(max_id_query)
-            next_id = id_result['next_id'] if id_result else 1
+            next_id = int(id_result['next_id']) if id_result else 1
             
             # Map art form category (vocal/instrumental/dance)
             art_form_category = self._map_art_form_category(
@@ -212,16 +223,17 @@ class EventService:
             
             query = """
             INSERT INTO artists_list (
-                tid, name, art_form, `On`, city, enter_state, 
+                tid, name, art_form, `On`, city, enter_state,
                 email, phone, artist_type, artist_grade,
+                bank_name, account_number, ifsc_code,
                 added_by, added_date, status, create_password
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s
             )
             """
-            
+
             current_date = datetime.now().strftime('%Y-%m-%d')
-            
+
             values = (
                 next_id,
                 artist_data.get('name'),
@@ -233,7 +245,10 @@ class EventService:
                 artist_data.get('phone', ''),
                 artist_data.get('artist_type', ''),
                 artist_data.get('artist_grade', ''),
-                'AI_Assistant',
+                artist_data.get('bank_name') or None,
+                artist_data.get('account_number') or None,
+                artist_data.get('ifsc_code') or None,
+                'AI',
                 current_date,
                 default_password_hash
             )
@@ -263,7 +278,53 @@ class EventService:
                 'success': False,
                 'error': str(e)
             }
-    
+
+    def update_artist_bank_details(self, artist_id: int, bank_data: dict) -> dict:
+        """
+        Add or update bank account details for an artist already in the database
+        (main or accompanying — both live in artists_list).
+
+        Args:
+            artist_id: artists_list.tid
+            bank_data: dict with optional bank_name, account_number, ifsc_code
+
+        Returns:
+            Dictionary with success status
+        """
+        try:
+            query = """
+                UPDATE artists_list
+                SET bank_name = %s, account_number = %s, ifsc_code = %s
+                WHERE tid = %s
+            """
+            values = (
+                bank_data.get('bank_name') or None,
+                bank_data.get('account_number') or None,
+                bank_data.get('ifsc_code') or None,
+                artist_id,
+            )
+            result = self.db.execute_query(query, values, commit=True)
+
+            if not result or not result.get('success'):
+                return {
+                    'success': False,
+                    'error': result.get('error', 'Failed to update bank details') if result else 'Unknown error'
+                }
+
+            logger.info(f"Bank details updated for artist ID {artist_id}")
+            return {
+                'success': True,
+                'artist_id': artist_id,
+                'message': f"Bank details saved for artist ID {artist_id}"
+            }
+
+        except Exception as e:
+            logger.error(f"Error updating artist bank details: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
     def _map_art_form_category(self, art_form: str, category: str = '') -> str:
         """
         Map art form to the 'On' category based on existing patterns
@@ -332,7 +393,7 @@ class EventService:
             # Get next institution ID
             max_id_query = "SELECT COALESCE(MAX(sid), 0) + 1 as next_id FROM institution_list"
             id_result = self.db.fetch_one(max_id_query)
-            next_id = id_result['next_id'] if id_result else 1
+            next_id = int(id_result['next_id']) if id_result else 1
             
             
                         # Generate password hash (default password)
@@ -427,13 +488,15 @@ class EventService:
         """Search events with filters"""
         try:
             query = """
-                SELECT 
+                SELECT
                     e.*,
                     a.name as artist_name,
-                    i.institution_name
+                    i.institution_name, i.email as institution_email,
+                    apr.request_id as apr_request_id
                 FROM event_list e
                 LEFT JOIN artists_list a ON e.artist = a.tid
                 LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN apr_payment_request apr ON apr.event_id = e.id
                 WHERE e.status = 1
             """
             params = []
@@ -464,12 +527,276 @@ class EventService:
                 params.append(filters['state'])
             
             query += " ORDER BY e.start_date DESC LIMIT 50"
-            
+
             return self.db.fetch_all(query, tuple(params))
-            
+
         except Exception as e:
             logger.error(f"Error searching events: {e}")
             return []
+
+    def get_pending_payment_events(self, filters: Dict = None) -> List[Dict]:
+        """
+        Find programs that don't yet have an uploaded contribution receipt
+        (apr_event_receipt.type_of_receipt = 'contribution') — candidates for a
+        Request for Payment reminder to the host institution.
+        """
+        filters = filters or {}
+        try:
+            query = """
+                SELECT
+                    e.id, e.title, e.start_date, e.event_status, e.budget,
+                    e.event_category AS module_name,
+                    a.name AS artist_name,
+                    i.sid AS institution_id, i.institution_name,
+                    i.email AS institution_email, i.city AS institution_city,
+                    i.state AS institution_state,
+                    i.name_of_the_coordinator AS institution_coordinator,
+                    apr.chapter, apr.request_id, apr.custom_apr
+                FROM event_list e
+                LEFT JOIN artists_list a ON e.artist = a.tid
+                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN apr_payment_request apr ON apr.event_id = e.id
+                LEFT JOIN apr_event_receipt r
+                    ON r.event_id = e.id AND r.type_of_receipt = 'contribution'
+                WHERE e.status = 1
+                  AND e.event_status NOT IN ('Cancelled', 'Rejected')
+                  AND r.id IS NULL
+            """
+            params = []
+
+            if filters.get('search'):
+                query += " AND (i.institution_name LIKE %s OR a.name LIKE %s)"
+                search_pattern = f"%{filters['search']}%"
+                params.extend([search_pattern, search_pattern])
+
+            if filters.get('city'):
+                query += " AND i.city LIKE %s"
+                params.append(f"%{filters['city']}%")
+
+            if filters.get('date_from'):
+                query += " AND e.start_date >= %s"
+                params.append(filters['date_from'])
+
+            if filters.get('date_to'):
+                query += " AND e.start_date <= %s"
+                params.append(filters['date_to'])
+
+            query += " ORDER BY e.start_date ASC LIMIT 50"
+
+            return self.db.fetch_all(query, tuple(params))
+
+        except Exception as e:
+            logger.error(f"Error fetching pending payment events: {e}")
+            return []
+
+    def get_event_for_payment(self, event_id: int) -> Optional[Dict]:
+        """Fetch one program with everything needed to build a Request for Payment reminder
+        (institution contact, coordinator, chapter/APR reference) — regardless of whether a
+        contribution receipt has already been uploaded (unlike get_pending_payment_events,
+        this allows re-sending a reminder on request)."""
+        try:
+            query = """
+                SELECT
+                    e.id, e.title, e.start_date, e.event_status, e.budget, e.image,
+                    e.event_category AS module_name, e.accompanying_artist,
+                    a.name AS artist_name,
+                    i.sid AS institution_id, i.institution_name,
+                    i.email AS institution_email, i.city AS institution_city,
+                    i.state AS institution_state,
+                    i.name_of_the_coordinator AS institution_coordinator,
+                    apr.chapter, apr.request_id, apr.custom_apr
+                FROM event_list e
+                LEFT JOIN artists_list a ON e.artist = a.tid
+                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN apr_payment_request apr ON apr.event_id = e.id
+                WHERE e.id = %s AND e.status = 1
+            """
+            return self.db.fetch_one(query, (event_id,))
+        except Exception as e:
+            logger.error(f"Error fetching event {event_id} for payment reminder: {e}")
+            return None
+
+    def send_payment_reminder(self, event_id, notification_service, institute_email: str = None,
+                               amount=None, institute_coordinator_name: str = None,
+                               coordinator_name: str = None, coordinator_email: str = None) -> dict:
+        """
+        Build and send a Request for Payment reminder for one program. The single shared
+        implementation used both by the chat assistant's send_payment_reminder tool and the
+        dashboard's per-row 'Send Payment Reminder' action, so behavior (PDF layout, poster
+        re-attachment, CC handling) stays identical regardless of where it's triggered from.
+        """
+        from app.services.pdf_service import (
+            generate_payment_request_pdf, save_payment_request_pdf, load_poster_bytes
+        )
+
+        ev = self.get_event_for_payment(event_id)
+        if not ev:
+            return {"success": False, "error": f"No program found with ID {event_id}"}
+
+        institute_email = (institute_email or ev.get('institution_email') or '').strip()
+        if not institute_email:
+            return {
+                "success": False,
+                "error": "No institute email on file or provided.",
+                "hint": "Provide the institute's email address and try again."
+            }
+
+        if amount is None:
+            amount = ev.get('budget')
+
+        institute_coordinator_name = institute_coordinator_name or ev.get('institution_coordinator') or ''
+        coordinator_email = (coordinator_email or '').strip()
+        cc_recipients = (
+            [coordinator_email]
+            if coordinator_email and coordinator_email.lower() != institute_email.lower()
+            else []
+        )
+
+        reminder_data = {
+            'amount':                     amount,
+            'coordinator_name':           coordinator_name or 'SPIC MACAY Team',
+            'chapter':                    ev.get('chapter') or '',
+            'institute_coordinator_name': institute_coordinator_name,
+        }
+        event_data_for_pdf = {
+            'institution_name': ev.get('institution_name', 'N/A'),
+            'city':              ev.get('institution_city', ''),
+            'module_name':       ev.get('module_name', 'Program'),
+            'artist_name':       ev.get('artist_name', 'N/A'),
+            'event_date':        str(ev.get('start_date') or ''),
+        }
+
+        try:
+            bank_config = notification_service.smtp_config.get('sm_bank_config')
+            pdf_bytes = generate_payment_request_pdf(reminder_data, event_data_for_pdf, bank_config)
+            if pdf_bytes:
+                save_payment_request_pdf(pdf_bytes, event_id)
+
+            poster_bytes = load_poster_bytes(ev.get('image'))
+
+            sent = notification_service.send_payment_reminder(
+                reminder_data, [institute_email], pdf_bytes=pdf_bytes,
+                cc_recipients=cc_recipients, poster_bytes=poster_bytes
+            )
+            cc_note = f" (cc: {coordinator_email})" if cc_recipients else ""
+            return {
+                "success": sent,
+                "event_id": event_id,
+                "recipient": institute_email,
+                "cc": coordinator_email if cc_recipients else None,
+                "amount": amount,
+                "message": (f"Payment reminder sent to {institute_email}{cc_note}." if sent
+                            else f"Failed to send payment reminder to {institute_email} — "
+                                 f"check SMTP configuration.")
+            }
+        except Exception as e:
+            logger.error(f"Error sending payment reminder for event {event_id}: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def get_event_for_resend(self, event_id: int) -> Optional[Dict]:
+        """Fetch a program with everything needed to regenerate its APR PDF and re-send the
+        confirmation email — used by resend_apr_email()."""
+        try:
+            query = """
+                SELECT
+                    e.id, e.title, e.image, e.start_date, e.event_time,
+                    e.event_category AS module_name, e.city, e.state, e.venue, e.attendees,
+                    e.accompanying_artist, e.added_by AS coordinator_name,
+                    a.name AS artist_name, a.art_form,
+                    i.institution_name,
+                    apr.request_id, apr.custom_apr, apr.chapter
+                FROM event_list e
+                LEFT JOIN artists_list a ON e.artist = a.tid
+                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN apr_payment_request apr ON apr.event_id = e.id
+                WHERE e.id = %s AND e.status = 1
+            """
+            return self.db.fetch_one(query, (event_id,))
+        except Exception as e:
+            logger.error(f"Error fetching event {event_id} for APR resend: {e}")
+            return None
+
+    def resend_apr_email(self, event_id: int, recipient_email: str, notification_service) -> dict:
+        """Regenerate the APR PDF and re-send the confirmation email for an existing
+        program — used by the dashboard's 'Resend APR Email' action."""
+        import re
+        from app.services.pdf_service import generate_apr_pdf, load_poster_bytes
+
+        ev = self.get_event_for_resend(event_id)
+        if not ev:
+            return {"success": False, "error": f"No program found with ID {event_id}"}
+        if not ev.get('request_id'):
+            return {"success": False, "error": "No APR has been generated yet for this program"}
+
+        recipient_email = (recipient_email or '').strip()
+        if not recipient_email:
+            return {"success": False, "error": "Recipient email is required"}
+
+        accompanying_raw = ev.get('accompanying_artist') or ''
+        accompanying_artists = [
+            {'name': name.strip(), 'art_form': art.strip()}
+            for name, art in re.findall(r'([^,()]+)\(([^)]*)\)', accompanying_raw)
+        ]
+
+        pdf_event_data = {
+            'artist_name':          ev.get('artist_name', 'N/A'),
+            'art_form':             ev.get('art_form', 'N/A'),
+            'module_name':          ev.get('module_name', 'N/A'),
+            'institution_name':     ev.get('institution_name', 'N/A'),
+            'city':                 ev.get('city', ''),
+            'state':                ev.get('state', ''),
+            'start_date':           str(ev.get('start_date') or ''),
+            'event_time':           ev.get('event_time', ''),
+            'attendees':            ev.get('attendees', 0),
+            'accompanying_artists': accompanying_artists,
+            'coordinator_name':     ev.get('coordinator_name', ''),
+            'coordinator_email':    recipient_email,
+            'chapter':              ev.get('chapter', ''),
+            'event_type':           'single',
+            'circuit_events':       [],
+        }
+        apr_data = {'request_id': ev['request_id'], 'custom_apr': ev.get('custom_apr', '')}
+
+        try:
+            pdf_bytes = generate_apr_pdf(apr_data, pdf_event_data)
+            poster_bytes = load_poster_bytes(ev.get('image'))
+
+            notification_data = {
+                'event_id':             event_id,
+                'request_id':           ev.get('request_id'),
+                'custom_apr':           ev.get('custom_apr', 'N/A'),
+                'title':                ev.get('title', ''),
+                'module_name':          ev.get('module_name', ''),
+                'artist_name':          ev.get('artist_name', ''),
+                'art_form':             ev.get('art_form', ''),
+                'accompanying_artists': accompanying_raw,
+                'start_date':           str(ev.get('start_date') or ''),
+                'event_time':           ev.get('event_time', ''),
+                'institution_name':     ev.get('institution_name', ''),
+                'venue':                ev.get('venue', ''),
+                'city':                 ev.get('city', ''),
+                'state':                ev.get('state', ''),
+                'attendees':            ev.get('attendees', ''),
+                'coordinator_name':     ev.get('coordinator_name', ''),
+            }
+            cc_list = notification_service.smtp_config.get('apr_cc_recipients') or []
+            recipients = list(cc_list)
+            if recipient_email not in recipients:
+                recipients.append(recipient_email)
+
+            sent = notification_service.send_event_confirmation(
+                notification_data, recipients, pdf_bytes=pdf_bytes,
+                photo_attachments=[poster_bytes] if poster_bytes else []
+            )
+            return {
+                "success": sent,
+                "recipients": recipients,
+                "message": (f"APR email resent to {', '.join(recipients)}." if sent
+                            else "Failed to resend APR email — check SMTP configuration.")
+            }
+        except Exception as e:
+            logger.error(f"Error resending APR email for event {event_id}: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
 
     def update_event_status(self, event_id: int, status: str, updated_by: str) -> bool:
         """Update event status"""
@@ -497,6 +824,67 @@ class EventService:
             logger.error(f"Error updating event status: {e}")
             return False
 
+    # Columns callers are allowed to change via update_event()
+    _EDITABLE_EVENT_FIELDS = {
+        'title', 'start_date', 'end_date', 'event_time', 'event_category',
+        'city', 'state', 'venue', 'attendees', 'budget',
+        'accompanying_artist', 'event_status',
+    }
+
+    def update_event(self, event_id: int, event_data: dict) -> bool:
+        """
+        Update an existing program (event_list row). Only whitelisted, editable
+        fields present in event_data are updated; unknown keys are ignored.
+        """
+        try:
+            updates = {
+                k: v for k, v in (event_data or {}).items()
+                if k in self._EDITABLE_EVENT_FIELDS
+            }
+            if not updates:
+                logger.warning(f"update_event called for {event_id} with no editable fields")
+                return False
+
+            updates['updated_date'] = datetime.now().strftime('%Y-%m-%d')
+            set_clause = ', '.join(f"{col} = %s" for col in updates)
+            query = f"UPDATE event_list SET {set_clause} WHERE id = %s"
+            values = tuple(updates.values()) + (event_id,)
+
+            result = self.db.execute_query(query, values, commit=True)
+
+            if result and result.get('success'):
+                logger.info(f"Event {event_id} updated: {list(updates.keys())}")
+                return True
+            return False
+
+        except Exception as e:
+            logger.error(f"Error updating event {event_id}: {e}")
+            return False
+
+    def delete_event(self, event_id: int) -> bool:
+        """
+        Soft-delete a program (status = 0) — matches the 'WHERE status = 1' convention
+        used everywhere else in this service, rather than an irreversible hard DELETE.
+        """
+        try:
+            query = """
+                UPDATE event_list
+                SET status = 0, updated_date = %s
+                WHERE id = %s
+            """
+            result = self.db.execute_query(
+                query, (datetime.now().strftime('%Y-%m-%d'), event_id), commit=True
+            )
+
+            if result and result.get('success'):
+                logger.info(f"Event {event_id} soft-deleted (status=0)")
+                return True
+            return False
+
+        except Exception as e:
+            logger.error(f"Error deleting event {event_id}: {e}")
+            return False
+
     def get_dashboard_stats(self) -> Dict:
         """Get statistics for dashboard"""
         try:
@@ -518,15 +906,35 @@ class EventService:
             
             # Upcoming events
             upcoming_query = """
-                SELECT COUNT(*) as count 
-                FROM event_list 
-                WHERE status = 1 
+                SELECT COUNT(*) as count
+                FROM event_list
+                WHERE status = 1
                 AND event_status = 'Pending'
                 AND start_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
             """
             upcoming_result = self.db.fetch_one(upcoming_query)
             stats['upcoming_events'] = upcoming_result['count'] if upcoming_result else 0
-            
+
+            # Current financial year events (FY runs Apr–Mar, same convention as create_event)
+            today = datetime.now()
+            if today.month >= 4:
+                current_fy = f"{today.year}-{today.year + 1}"
+            else:
+                current_fy = f"{today.year - 1}-{today.year}"
+            fy_query = "SELECT COUNT(*) as count FROM event_list WHERE status = 1 AND fy = %s"
+            fy_result = self.db.fetch_one(fy_query, (current_fy,))
+            stats['current_fy_events'] = fy_result['count'] if fy_result else 0
+
+            # Events by module type
+            module_query = """
+                SELECT event_category as module_name, COUNT(*) as count
+                FROM event_list
+                WHERE status = 1
+                GROUP BY event_category
+                ORDER BY count DESC
+            """
+            stats['events_by_module'] = self.db.fetch_all(module_query)
+
             # Recent events
             recent_query = """
                 SELECT e.*, a.name as artist_name, i.institution_name
@@ -551,7 +959,60 @@ class EventService:
             stats['events_by_state'] = self.db.fetch_all(state_query)
             
             return stats
-            
+
         except Exception as e:
             logger.error(f"Error fetching dashboard stats: {e}")
             return {}
+
+    def get_distinct_states(self) -> List[str]:
+        """Get the distinct list of states with registered programs, for dashboard filters"""
+        try:
+            query = """
+                SELECT DISTINCT state
+                FROM event_list
+                WHERE state IS NOT NULL AND state <> ''
+                ORDER BY state
+            """
+            rows = self.db.fetch_all(query)
+            return [row['state'] for row in rows if row.get('state')]
+        except Exception as e:
+            logger.error(f"Error fetching distinct states: {e}")
+            return []
+
+    def update_event_photos(self, event_id: int, photo_paths: List[str]) -> dict:
+        """
+        Persist relative photo paths (under app/static/) for a program onto
+        event_list.image — reuses the existing unused varchar(255) column as a
+        comma-separated list rather than requiring a new table.
+        """
+        try:
+            joined = ','.join(photo_paths)
+            if len(joined) > 255:
+                # Keep as many whole paths as fit rather than truncating mid-path
+                kept = []
+                for p in photo_paths:
+                    candidate = ','.join(kept + [p])
+                    if len(candidate) > 255:
+                        break
+                    kept.append(p)
+                joined = ','.join(kept)
+                logger.warning(
+                    f"Photo path list for event {event_id} exceeded 255 chars; "
+                    f"kept {len(kept)}/{len(photo_paths)} photos"
+                )
+
+            query = "UPDATE event_list SET image = %s WHERE id = %s"
+            result = self.db.execute_query(query, (joined, event_id), commit=True)
+
+            if not result or not result.get('success'):
+                return {
+                    'success': False,
+                    'error': result.get('error', 'Failed to save photos') if result else 'Unknown error'
+                }
+
+            logger.info(f"Photos saved for event {event_id}: {joined}")
+            return {'success': True, 'event_id': event_id, 'image': joined}
+
+        except Exception as e:
+            logger.error(f"Error updating event photos: {e}", exc_info=True)
+            return {'success': False, 'error': str(e)}

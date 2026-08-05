@@ -7,7 +7,9 @@
 class ChatInterface {
     constructor() {
         this.isWaitingForResponse = false;
-        this.apiBaseUrl = '/api/agent';
+        // window.APP_ROOT (injected by the page template) is the app's URL prefix when
+        // served behind a reverse-proxy sub-path — empty string at the domain root.
+        this.apiBaseUrl = (window.APP_ROOT || '') + '/api/agent';
         this.conversationInitialized = false;
         this.currentAgentType = null;
         this.firstMessageSent = false;  // Track if user has sent first message
@@ -17,7 +19,14 @@ class ChatInterface {
         this.chatMessages = document.getElementById('chat-messages');
         this.typingIndicator = document.getElementById('typing-indicator');
         this.charCount = document.getElementById('char-count');
-        
+
+        // Poster image attachment state
+        this.posterFile = null;
+
+        // Optional event/program photos attachment state — array of
+        // { data: base64, filename, mime_type } waiting to be sent with the next message
+        this.pendingPhotos = [];
+
         this.init();
     }
     
@@ -42,7 +51,27 @@ class ChatInterface {
             this.messageInput.style.height = this.messageInput.scrollHeight + 'px';
             this.updateCharCount();
         });
-        
+
+        // Poster image attachment
+        const posterInput = document.getElementById('poster-file-input');
+        if (posterInput) {
+            posterInput.addEventListener('change', (e) => this._onPosterSelected(e));
+        }
+        const removePosterBtn = document.getElementById('remove-poster-btn');
+        if (removePosterBtn) {
+            removePosterBtn.addEventListener('click', () => this._clearPoster());
+        }
+
+        // Optional event/program photos attachment (separate from the poster)
+        const photosInput = document.getElementById('photos-file-input');
+        if (photosInput) {
+            photosInput.addEventListener('change', (e) => this._onPhotosSelected(e));
+        }
+        const removePhotosBtn = document.getElementById('remove-photos-btn');
+        if (removePhotosBtn) {
+            removePhotosBtn.addEventListener('click', () => this._clearPhotos());
+        }
+
         console.log('[ChatInterface] Initialized');
     }
     
@@ -96,23 +125,25 @@ class ChatInterface {
     
     async sendMessage() {
         const message = this.messageInput.value.trim();
-        
-        if (!message || this.isWaitingForResponse) return;
-        
+        const hasPoster = !!this.posterFile;
+        const hasPhotos = this.pendingPhotos.length > 0;
+
+        // Allow send if there's text, a poster, or attached photos (any alone is valid)
+        if ((!message && !hasPoster && !hasPhotos) || this.isWaitingForResponse) return;
+
         if (!this.conversationInitialized) {
             console.error('[ChatInterface] No active conversation');
             this.showError('Chat not initialized. Please refresh the page.');
             return;
         }
-        
-        console.log('[ChatInterface] Sending message:', message);
-        
+
+        console.log('[ChatInterface] Sending message:', message, hasPoster ? '+ poster' : '');
+
         // If this is the first message, remove welcome screen and show greeting
         if (!this.firstMessageSent) {
             console.log('[ChatInterface] First message - removing welcome screen');
             this.removeWelcomeScreen();
-            
-            // Show the initial greeting now
+
             if (this.initialGreeting) {
                 this.displayMessage(
                     this.initialGreeting.response,
@@ -121,33 +152,51 @@ class ChatInterface {
                 );
                 this.showAgentIndicator(this.initialGreeting.agent_type);
             }
-            
+
             this.firstMessageSent = true;
         }
-        
-        // Display user message
-        this.displayMessage(message, 'user');
-        
-        // Clear input
+
+        // Display user message (show poster/photo summary if there's no typed text)
+        const displayText = message
+            || (hasPoster ? `[Poster: ${this.posterFile.name}]` : '')
+            || (hasPhotos ? `[${this.pendingPhotos.length} photo(s) attached]` : '');
+        this.displayMessage(displayText, 'user');
+
+        // Clear input and poster
         this.messageInput.value = '';
         this.messageInput.style.height = 'auto';
         this.updateCharCount();
-        
+        const capturedPoster = this.posterFile;
+        this._clearPoster();
+
         // Show typing indicator
         this.showTypingIndicator();
         this.isWaitingForResponse = true;
         this.sendButton.disabled = true;
-        
+        if (this.micBtn) this.micBtn.disabled = true;
+
         try {
-            const response = await fetch(`${this.apiBaseUrl}/chat`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    message: message
-                })
-            });
+            let fetchOpts;
+            if (capturedPoster) {
+                // Multipart — image upload path
+                const fd = new FormData();
+                fd.append('image', capturedPoster);
+                fd.append('message', message);
+                fetchOpts = { method: 'POST', body: fd };
+            } else {
+                // JSON — normal text path (include any pending event/program photos)
+                const payload = { message };
+                if (this.pendingPhotos.length) {
+                    payload.event_photos = this.pendingPhotos;
+                }
+                fetchOpts = {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                };
+            }
+
+            const response = await fetch(`${this.apiBaseUrl}/chat`, fetchOpts);
             
             console.log('[ChatInterface] Chat response status:', response.status);
             
@@ -160,19 +209,21 @@ class ChatInterface {
                 // Update current agent type
                 this.currentAgentType = data.agent_type;
                 
-                // Display bot response with agent type
-                this.displayMessage(data.response, 'bot', data.agent_type);
+                // Display bot response with agent type (attach a PDF download button if one is ready)
+                this.displayMessage(data.response, 'bot', data.agent_type, data.pdf_download_url);
                 
                 // Show which agent is responding
                 this.showAgentIndicator(data.agent_type);
                 
                 // Handle special cases based on agent type
                 if (data.agent_type === 'event_creation') {
-                    // Check if event was created
+                    // Check if the program/APR was created
                     if (data.event_created) {
-                        this.showSuccessNotification('Event created successfully!');
+                        this.showSuccessNotification('Program registered successfully!');
+                        // Photos (if any) have now been consumed server-side — clear the UI
+                        this._clearPhotos();
                     }
-                    
+
                     // Check if in collection mode
                     if (data.collecting_info) {
                         console.log('[ChatInterface] Collecting event information...');
@@ -191,7 +242,10 @@ class ChatInterface {
                 if (data.context) {
                     console.log('[ChatInterface] Conversation context:', data.context);
                 }
-                
+
+                // Hook for subclasses (e.g. UnifiedChatInterface's auto-speak) — no-op by default
+                await this._afterBotResponse(data);
+
             } else {
                 console.error('[ChatInterface] ❌ Chat error:', data.error);
                 this.displayMessage(
@@ -211,11 +265,12 @@ class ChatInterface {
         } finally {
             this.isWaitingForResponse = false;
             this.sendButton.disabled = false;
+            if (this.micBtn) this.micBtn.disabled = false;
             this.messageInput.focus();
         }
     }
     
-    displayMessage(text, sender, agentType = null) {
+    displayMessage(text, sender, agentType = null, downloadUrl = null) {
         console.log('[displayMessage] Called with:', {
             sender,
             agentType,
@@ -270,8 +325,19 @@ class ChatInterface {
         }
         
         contentDiv.appendChild(bubble);
+
+        // PDF download button — a real clickable UI element, not just a link in the text
+        if (sender === 'bot' && downloadUrl) {
+            const downloadBtn = document.createElement('a');
+            downloadBtn.className = 'apr-download-btn';
+            downloadBtn.href = downloadUrl;
+            downloadBtn.setAttribute('download', '');
+            downloadBtn.innerHTML = '<i class="fas fa-file-pdf"></i> Download APR PDF';
+            contentDiv.appendChild(downloadBtn);
+        }
+
         contentDiv.appendChild(time);
-        
+
         if (sender === 'bot') {
             messageDiv.appendChild(avatar);
             messageDiv.appendChild(contentDiv);
@@ -372,15 +438,120 @@ class ChatInterface {
     
     showSuccessNotification(message) {
         console.log('[ChatInterface] Success:', message);
-        
+
         const toast = document.getElementById('successToast');
         const toastBody = document.getElementById('successToastBody');
-        
+
         if (toast && toastBody) {
             toastBody.textContent = message;
             const bsToast = new bootstrap.Toast(toast);
             bsToast.show();
         }
+    }
+
+    // Extension point for subclasses (e.g. UnifiedChatInterface adds auto-speak here)
+    // instead of re-implementing sendMessage() from scratch.
+    async _afterBotResponse(data) {}
+
+    // ── Poster image helpers ─────────────────────────────────────────────── //
+
+    _onPosterSelected(e) {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+
+        const MAX = 10 * 1024 * 1024; // 10 MB
+        if (file.size > MAX) {
+            this.showError('Image too large — please choose one under 10 MB.');
+            e.target.value = '';
+            return;
+        }
+        if (!file.type.startsWith('image/')) {
+            this.showError('Please select an image file (JPG, PNG, etc.).');
+            e.target.value = '';
+            return;
+        }
+
+        this.posterFile = file;
+
+        // Show preview strip
+        const strip = document.getElementById('poster-preview-strip');
+        const thumb = document.getElementById('poster-thumb');
+        const nameEl = document.getElementById('poster-filename');
+        const sizeEl = document.getElementById('poster-filesize');
+
+        if (strip && thumb) {
+            const url = URL.createObjectURL(file);
+            thumb.src = url;
+            thumb.onload = () => URL.revokeObjectURL(url);
+            if (nameEl) nameEl.textContent = file.name;
+            if (sizeEl) sizeEl.textContent = (file.size / 1024).toFixed(0) + ' KB';
+            strip.style.display = 'flex';
+        }
+
+        // Update placeholder
+        this.messageInput.placeholder = 'Add a note (optional) — or just click Send to analyse the poster…';
+        console.log('[ChatInterface] Poster selected:', file.name);
+    }
+
+    _clearPoster() {
+        this.posterFile = null;
+        const strip = document.getElementById('poster-preview-strip');
+        if (strip) strip.style.display = 'none';
+        const input = document.getElementById('poster-file-input');
+        if (input) input.value = '';
+        this.messageInput.placeholder = 'Type or speak your message...';
+    }
+
+    // ── Event/program photos helpers (optional, attached to the APR email) ── //
+
+    _onPhotosSelected(e) {
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
+
+        const MAX = 10 * 1024 * 1024; // 10 MB per photo
+        for (const file of files) {
+            if (file.size > MAX) {
+                this.showError(`"${file.name}" is too large — please choose photos under 10 MB.`);
+                continue;
+            }
+            if (!file.type.startsWith('image/')) {
+                this.showError(`"${file.name}" isn't an image file.`);
+                continue;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+                // reader.result is a data URL "data:image/jpeg;base64,...."
+                const base64 = String(reader.result).split(',')[1] || '';
+                this.pendingPhotos.push({
+                    data: base64,
+                    filename: file.name,
+                    mime_type: file.type || 'image/jpeg'
+                });
+                this._updatePhotosPreview();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        e.target.value = ''; // allow re-selecting the same file(s) later
+    }
+
+    _updatePhotosPreview() {
+        const strip = document.getElementById('photos-preview-strip');
+        const summary = document.getElementById('photos-summary');
+        if (!strip || !summary) return;
+        if (this.pendingPhotos.length) {
+            summary.textContent = `${this.pendingPhotos.length} photo${this.pendingPhotos.length > 1 ? 's' : ''} attached`;
+            strip.style.display = 'flex';
+        } else {
+            strip.style.display = 'none';
+        }
+    }
+
+    _clearPhotos() {
+        this.pendingPhotos = [];
+        const input = document.getElementById('photos-file-input');
+        if (input) input.value = '';
+        this._updatePhotosPreview();
     }
 }
 
@@ -403,7 +574,7 @@ async function resetChat() {
     
     if (confirm('Are you sure you want to reset the conversation?')) {
         try {
-            const response = await fetch('/api/agent/reset', {
+            const response = await fetch((window.APP_ROOT || '') + '/api/agent/reset', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -473,7 +644,7 @@ async function getConversationHistory() {
     console.log('[Global] Getting conversation history...');
     
     try {
-        const response = await fetch('/api/agent/history', {
+        const response = await fetch((window.APP_ROOT || '') + '/api/agent/history', {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json'
@@ -494,7 +665,7 @@ async function checkAgentStatus() {
     console.log('[Global] Checking agent status...');
     
     try {
-        const response = await fetch('/api/agent/status', {
+        const response = await fetch((window.APP_ROOT || '') + '/api/agent/status', {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json'

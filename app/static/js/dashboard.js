@@ -5,8 +5,11 @@
 
 class SPICMacayDashboard {
     constructor() {
-        this.apiBaseUrl = '/api';
+        // window.APP_ROOT (injected by base.html) is the app's URL prefix when served
+        // behind a reverse-proxy sub-path — empty string at the domain root.
+        this.apiBaseUrl = (window.APP_ROOT || '') + '/api';
         this.charts = {};
+        this.eventsById = {};
         this.init();
     }
     
@@ -83,7 +86,7 @@ class SPICMacayDashboard {
                 data: {
                     labels: stats.events_by_state.map(item => item.state || 'Unknown'),
                     datasets: [{
-                        label: 'Number of Events',
+                        label: 'Number of Programs',
                         data: stats.events_by_state.map(item => item.count),
                         backgroundColor: 'rgba(139, 0, 0, 0.8)',
                         borderColor: 'rgba(139, 0, 0, 1)',
@@ -108,7 +111,7 @@ class SPICMacayDashboard {
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    return context.parsed.y + ' events';
+                                    return context.parsed.y + ' programs';
                                 }
                             }
                         }
@@ -184,7 +187,7 @@ class SPICMacayDashboard {
                 data: {
                     labels: stats.events_by_module.map(item => item.module_name || 'Other'),
                     datasets: [{
-                        label: 'Number of Events',
+                        label: 'Number of Programs',
                         data: stats.events_by_module.map(item => item.count),
                         backgroundColor: 'rgba(220, 20, 60, 0.7)',
                         borderColor: 'rgba(220, 20, 60, 1)',
@@ -231,23 +234,29 @@ class SPICMacayDashboard {
             }
         } catch (error) {
             console.error('Error loading events:', error);
-            this.showEmptyState('Error loading events. Please try again.');
+            this.showEmptyState('Error loading programs. Please try again.');
         }
     }
     
     displayEvents(events) {
         const tbody = document.getElementById('events-table-body');
-        
+
         if (events.length === 0) {
-            this.showEmptyState('No events found matching your criteria.');
+            this.showEmptyState('No programs found matching your criteria.');
             return;
         }
-        
+
+        // Keep full row data around so the small action buttons (which only carry the
+        // event id in their onclick) can look up sensible defaults — e.g. institution
+        // email, budget — without re-fetching or escaping strings into HTML attributes.
+        this.eventsById = {};
+        events.forEach(event => { this.eventsById[event.id] = event; });
+
         tbody.innerHTML = events.map(event => `
             <tr>
                 <td><strong>#${event.id}</strong></td>
-                <td class="text-truncate" style="max-width: 200px;" title="${event.title || 'Untitled Event'}">
-                    ${event.title || 'Untitled Event'}
+                <td class="text-truncate" style="max-width: 200px;" title="${event.title || 'Untitled Program'}">
+                    ${event.title || 'Untitled Program'}
                 </td>
                 <td>${event.artist_name || 'N/A'}</td>
                 <td><small>${event.art_form || 'N/A'}</small></td>
@@ -259,9 +268,22 @@ class SPICMacayDashboard {
                 <td><span class="status-badge status-${this.getStatusClass(event.event_status)}">${event.event_status}</span></td>
                 <td><small>${event.fy || 'N/A'}</small></td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="viewEventDetails(${event.id})" title="View Details">
-                        <i class="fas fa-eye"></i>
-                    </button>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button class="btn btn-outline-primary" onclick="viewEventDetails(${event.id})" title="View Details">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <button class="btn btn-outline-secondary" onclick="downloadAprPdf(${event.id})"
+                                title="${event.apr_request_id ? 'Download APR PDF' : 'No APR generated yet'}"
+                                ${event.apr_request_id ? '' : 'disabled'}>
+                            <i class="fas fa-file-pdf"></i>
+                        </button>
+                        <button class="btn btn-outline-info" onclick="resendAprEmail(${event.id})" title="Resend APR Email">
+                            <i class="fas fa-envelope"></i>
+                        </button>
+                        <button class="btn btn-outline-warning" onclick="sendPaymentReminderFromDashboard(${event.id})" title="Send Payment Reminder to Institute">
+                            <i class="fas fa-hand-holding-usd"></i>
+                        </button>
+                    </div>
                 </td>
             </tr>
         `).join('');
@@ -353,7 +375,7 @@ async function refreshEvents() {
 
 async function viewEventDetails(eventId) {
     try {
-        const response = await fetch(`/api/events/${eventId}`);
+        const response = await fetch(`${window.APP_ROOT || ''}/api/events/${eventId}`);
         const data = await response.json();
         
         if (data.success) {
@@ -365,7 +387,7 @@ async function viewEventDetails(eventId) {
                     <div class="row mb-3">
                         <div class="col-12">
                             <div class="alert alert-info">
-                                <strong>Event ID:</strong> #${event.id} | 
+                                <strong>Program ID:</strong> #${event.id} |
                                 <strong>APR Request ID:</strong> ${event.request_id || 'N/A'} |
                                 <strong>Custom APR:</strong> ${event.custom_apr || 'N/A'}
                             </div>
@@ -374,7 +396,7 @@ async function viewEventDetails(eventId) {
                     
                     <div class="row">
                         <div class="col-md-6">
-                            <h6 class="text-muted mb-3"><i class="fas fa-info-circle"></i> Event Information</h6>
+                            <h6 class="text-muted mb-3"><i class="fas fa-info-circle"></i> Program Information</h6>
                             <table class="table table-sm">
                                 <tr>
                                     <td><strong>Title:</strong></td>
@@ -492,6 +514,60 @@ async function viewEventDetails(eventId) {
     } catch (error) {
         console.error('Error loading event details:', error);
         alert('Error loading event details. Please try again.');
+    }
+}
+
+function downloadAprPdf(eventId) {
+    const event = window.dashboard && window.dashboard.eventsById[eventId];
+    const requestId = event && event.apr_request_id;
+    if (!requestId) {
+        alert('No APR has been generated yet for this program.');
+        return;
+    }
+    window.open(`${window.APP_ROOT || ''}/api/agent/apr/download/${encodeURIComponent(requestId)}`, '_blank');
+}
+
+async function resendAprEmail(eventId) {
+    const event = (window.dashboard && window.dashboard.eventsById[eventId]) || {};
+    const email = prompt('Resend the APR confirmation email to:', event.institution_email || '');
+    if (!email) return;
+
+    try {
+        const response = await fetch(`${window.APP_ROOT || ''}/api/events/${eventId}/resend-apr-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        const data = await response.json();
+        alert(data.success ? `APR email resent to ${email}.` : `Failed to resend: ${data.error || 'Unknown error'}`);
+    } catch (error) {
+        console.error('Error resending APR email:', error);
+        alert('Error resending APR email. Please try again.');
+    }
+}
+
+async function sendPaymentReminderFromDashboard(eventId) {
+    const event = (window.dashboard && window.dashboard.eventsById[eventId]) || {};
+
+    const instituteEmail = prompt('Send payment reminder to institute email:', event.institution_email || '');
+    if (!instituteEmail) return;
+
+    const defaultAmount = event.budget != null ? event.budget : '';
+    const amountInput = prompt('Contribution amount to request (₹):', defaultAmount);
+    if (amountInput === null) return; // cancelled
+    const amount = amountInput.trim() ? parseFloat(amountInput) : undefined;
+
+    try {
+        const response = await fetch(`${window.APP_ROOT || ''}/api/events/${eventId}/send-payment-reminder`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ institute_email: instituteEmail, amount })
+        });
+        const data = await response.json();
+        alert(data.success ? `Payment reminder sent to ${instituteEmail}.` : `Failed to send: ${data.error || 'Unknown error'}`);
+    } catch (error) {
+        console.error('Error sending payment reminder:', error);
+        alert('Error sending payment reminder. Please try again.');
     }
 }
 

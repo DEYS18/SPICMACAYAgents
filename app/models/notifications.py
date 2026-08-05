@@ -30,34 +30,69 @@ class NotificationService:
         if not self.enabled:
             logger.warning("Email notifications disabled - SMTP credentials not configured")
     
-    def send_event_confirmation(self, event_data: dict, recipients: list) -> bool:
+    def send_event_confirmation(self, event_data: dict, recipients: list,
+                               pdf_bytes: bytes = None, photo_attachments: list = None) -> bool:
         """
-        Send event confirmation email with calendar invite
-        
+        Send program confirmation email with optional APR PDF and photo attachments.
+
         Args:
-            event_data: Event details dictionary
-            recipients: List of email addresses
-            
+            event_data:        Event/program details dictionary
+            recipients:        List of email addresses
+            pdf_bytes:         Optional APR PDF as bytes — attached when provided
+            photo_attachments: Optional list of raw image bytes — attached when provided
+
         Returns:
             True if sent successfully, False otherwise
         """
         if not self.enabled:
             logger.info("Email notifications disabled, skipping")
             return False
-        
+
         try:
-            # Create email
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = f"SPIC MACAY Event Confirmation - {event_data.get('title', 'New Event')}"
+            # Use 'mixed' when we have attachments so we can combine HTML + files
+            msg = MIMEMultipart('mixed')
+            msg['Subject'] = f"SPIC MACAY Artist Payment Request (APR) Confirmation - {event_data.get('title', 'New Program')}"
             msg['From'] = self.smtp_config['from_email']
             msg['To'] = ', '.join(recipients)
-            
-            # Create HTML email body
+
+            # HTML body
             html_body = self._create_confirmation_email_html(event_data)
             html_part = MIMEText(html_body, 'html')
             msg.attach(html_part)
-            
-            # Create calendar invite
+
+            # APR PDF attachment
+            if pdf_bytes:
+                try:
+                    request_id = event_data.get('request_id', 'APR')
+                    pdf_part = MIMEBase('application', 'pdf')
+                    pdf_part.set_payload(pdf_bytes)
+                    encoders.encode_base64(pdf_part)
+                    pdf_part.add_header(
+                        'Content-Disposition', 'attachment',
+                        filename=f'APR_{request_id}.pdf'
+                    )
+                    msg.attach(pdf_part)
+                    logger.info("APR PDF attached to email")
+                except Exception as e:
+                    logger.warning(f"Failed to attach APR PDF: {e}")
+
+            # Optional program photos
+            for idx, photo_bytes in enumerate(photo_attachments or [], 1):
+                try:
+                    img_part = MIMEBase('image', 'jpeg')
+                    img_part.set_payload(photo_bytes)
+                    encoders.encode_base64(img_part)
+                    img_part.add_header(
+                        'Content-Disposition', 'attachment',
+                        filename=f'program_photo_{idx}.jpg'
+                    )
+                    msg.attach(img_part)
+                except Exception as e:
+                    logger.warning(f"Failed to attach program photo {idx}: {e}")
+            if photo_attachments:
+                logger.info(f"{len(photo_attachments)} program photo(s) attached to email")
+
+            # Calendar invite
             try:
                 calendar_invite = self._create_calendar_invite(event_data)
                 if calendar_invite:
@@ -68,30 +103,31 @@ class NotificationService:
                     msg.attach(cal_part)
             except Exception as e:
                 logger.warning(f"Failed to create calendar invite: {e}")
-            
-            # Send email
+
+            # Send
             with smtplib.SMTP(self.smtp_config['host'], self.smtp_config['port']) as server:
                 server.starttls()
                 server.login(self.smtp_config['user'], self.smtp_config['password'])
                 server.send_message(msg)
-            
+
             logger.info(f"Event confirmation sent to {recipients}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to send event confirmation: {e}")
             return False
     
     def _create_confirmation_email_html(self, event_data: dict) -> str:
-        """Create HTML email body for event confirmation"""
-        
+        """Create HTML email body for program (APR) confirmation"""
+
         event_id = event_data.get('event_id', 'N/A')
         request_id = event_data.get('request_id', 'N/A')
         custom_apr = event_data.get('custom_apr', 'N/A')
-        title = event_data.get('title', 'SPIC MACAY Event')
-        module_name = event_data.get('module_name', 'Event')
+        title = event_data.get('title', 'SPIC MACAY Program')
+        module_name = event_data.get('module_name', 'Program')
         artist_name = event_data.get('artist_name', 'N/A')
         art_form = event_data.get('art_form', 'N/A')
+        accompanying_artists = event_data.get('accompanying_artists', '')
         start_date = event_data.get('start_date', 'N/A')
         event_time = event_data.get('event_time', 'N/A')
         institution_name = event_data.get('institution_name', 'N/A')
@@ -99,6 +135,11 @@ class NotificationService:
         city = event_data.get('city', 'N/A')
         state = event_data.get('state', 'N/A')
         attendees = event_data.get('attendees', 'N/A')
+        accompanying_row = f"""
+                <div class="detail-row">
+                    <div class="detail-label">Accompanying:</div>
+                    <div class="detail-value">{accompanying_artists}</div>
+                </div>""" if accompanying_artists else ""
         
         html = f"""
 <!DOCTYPE html>
@@ -167,45 +208,45 @@ class NotificationService:
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎭 SPIC MACAY Event Confirmation</h1>
+            <h1>🎭 SPIC MACAY Artist Payment Request (APR) Confirmation</h1>
             <p>Society for the Promotion of Indian Classical Music and Culture Amongst Youth</p>
         </div>
-        
+
         <div class="content">
             <p>Namaste,</p>
-            
-            <p>Your SPIC MACAY event has been successfully registered and an Artist Payment Report (APR) has been created.</p>
-            
+
+            <p>Your SPIC MACAY program has been successfully registered and an Artist Payment Request (APR) has been created.</p>
+
             <div class="apr-box">
                 <strong>📋 APR Details:</strong><br>
-                <strong>Event ID:</strong> #{event_id}<br>
+                <strong>Program ID:</strong> #{event_id}<br>
                 <strong>APR Request ID:</strong> {request_id}<br>
                 <strong>Custom APR:</strong> {custom_apr}
             </div>
-            
+
             <div class="event-details">
-                <h3 style="color: #8B0000; margin-top: 0;">Event Details</h3>
-                
+                <h3 style="color: #8B0000; margin-top: 0;">Program Details</h3>
+
                 <div class="detail-row">
-                    <div class="detail-label">Event Title:</div>
+                    <div class="detail-label">Program Title:</div>
                     <div class="detail-value">{title}</div>
                 </div>
-                
+
                 <div class="detail-row">
-                    <div class="detail-label">Event Type:</div>
+                    <div class="detail-label">Program Type:</div>
                     <div class="detail-value">{module_name}</div>
                 </div>
-                
+
                 <div class="detail-row">
                     <div class="detail-label">Artist:</div>
                     <div class="detail-value">{artist_name}</div>
                 </div>
-                
+
                 <div class="detail-row">
                     <div class="detail-label">Art Form:</div>
                     <div class="detail-value">{art_form}</div>
                 </div>
-                
+                {accompanying_row}
                 <div class="detail-row">
                     <div class="detail-label">Date:</div>
                     <div class="detail-value">{start_date}</div>
@@ -255,7 +296,7 @@ class NotificationService:
         </div>
         
         <div class="footer">
-            <p>This is an automated email from SPIC MACAY Event Management System</p>
+            <p>This is an automated email from SPIC MACAY Program Management System</p>
             <p>&copy; {datetime.now().year} SPIC MACAY. All rights reserved.</p>
         </div>
     </div>
@@ -313,3 +354,112 @@ class NotificationService:
         except Exception as e:
             logger.error(f"Error creating calendar invite: {e}")
             return None
+
+    def send_payment_reminder(self, reminder_data: dict, recipients: list,
+                               pdf_bytes: bytes = None, cc_recipients: list = None,
+                               poster_bytes: bytes = None) -> bool:
+        """
+        Send a "Request for Payment" reminder email to a host institution, using the
+        standard template in email_templates/payment_reminder_template.txt, with the
+        Request for Payment PDF attached.
+
+        Args:
+            reminder_data: {'institute_coordinator_name': ..., 'coordinator_name': ...}
+            recipients:    List of email addresses (the institution's email)
+            pdf_bytes:     Optional Request for Payment PDF as bytes — attached when provided
+            cc_recipients: Optional list of addresses to CC — the SPIC MACAY coordinator
+                           who requested the reminder is always CC'd here when known
+            poster_bytes:  Optional program poster image, re-attached from when it was
+                           first uploaded during APR creation
+
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        if not self.enabled:
+            logger.info("Email notifications disabled, skipping payment reminder")
+            return False
+
+        try:
+            body_text = self._render_payment_reminder_body(reminder_data)
+
+            msg = MIMEMultipart('mixed')
+            msg['Subject'] = "Request for Feedback & Program Contribution – SPIC MACAY"
+            msg['From'] = self.smtp_config['from_email']
+            msg['To'] = ', '.join(recipients)
+            if cc_recipients:
+                msg['Cc'] = ', '.join(cc_recipients)
+            msg.attach(MIMEText(body_text, 'plain'))
+
+            if pdf_bytes:
+                try:
+                    pdf_part = MIMEBase('application', 'pdf')
+                    pdf_part.set_payload(pdf_bytes)
+                    encoders.encode_base64(pdf_part)
+                    pdf_part.add_header(
+                        'Content-Disposition', 'attachment',
+                        filename='Request_for_Payment.pdf'
+                    )
+                    msg.attach(pdf_part)
+                except Exception as e:
+                    logger.warning(f"Failed to attach payment request PDF: {e}")
+
+            if poster_bytes:
+                try:
+                    poster_part = MIMEBase('image', 'jpeg')
+                    poster_part.set_payload(poster_bytes)
+                    encoders.encode_base64(poster_part)
+                    poster_part.add_header(
+                        'Content-Disposition', 'attachment',
+                        filename='program_poster.jpg'
+                    )
+                    msg.attach(poster_part)
+                except Exception as e:
+                    logger.warning(f"Failed to attach program poster: {e}")
+
+            with smtplib.SMTP(self.smtp_config['host'], self.smtp_config['port']) as server:
+                server.starttls()
+                server.login(self.smtp_config['user'], self.smtp_config['password'])
+                server.send_message(msg)
+
+            logger.info(f"Payment reminder sent to {recipients}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to send payment reminder: {e}")
+            return False
+
+    def _render_payment_reminder_body(self, reminder_data: dict) -> str:
+        """Load email_templates/payment_reminder_template.txt and fill in placeholders."""
+        import os
+
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        template_path = os.path.join(base_dir, 'email_templates', 'payment_reminder_template.txt')
+
+        try:
+            with open(template_path, 'r', encoding='utf-8') as fh:
+                template = fh.read()
+        except Exception as e:
+            logger.error(f"Could not load payment reminder template at {template_path}: {e}")
+            template = ("Dear Sir/Maam,\n\nThis is a reminder to process your SPIC MACAY "
+                        "program contribution.\n\nWarm regards,\n{coordinator_name}\nSPIC MACAY")
+
+        institute_coordinator_name = (reminder_data.get('institute_coordinator_name') or '').strip()
+        salutation = f"Dear {institute_coordinator_name}," if institute_coordinator_name else "Dear Sir/Maam,"
+
+        feedback_url = (self.smtp_config.get('feedback_form_url') or '').strip()
+        feedback_line = f"Submit Feedback: {feedback_url}" if feedback_url else \
+            "(Feedback form link to follow separately)"
+
+        coordinator_name = reminder_data.get('coordinator_name') or 'SPIC MACAY Team'
+
+        # Template's "Subject:" line is metadata for the coordinator, not part of the mail body
+        lines = template.split('\n')
+        if lines and lines[0].lower().startswith('subject:'):
+            lines = lines[1:]
+        body_template = '\n'.join(lines).lstrip('\n')
+
+        return body_template.format(
+            salutation=salutation,
+            feedback_form_line=feedback_line,
+            coordinator_name=coordinator_name,
+        )

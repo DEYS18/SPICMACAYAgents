@@ -41,11 +41,23 @@ class SPICMacayAgent:
         self.db_validator = db_validator
         self.event_service = event_service
         self.notification_service = notification_service
-        
+
         # Conversation state
         self.conversation_history = []
         self.event_data = {}
         self.state = 'greeting'
+        # Photos attached by the client (base64) waiting to be saved on the next
+        # successful create_event call — see attach_pending_photos().
+        self.pending_photos = []
+        # Set after a successful create_event tool call so callers (AgentRouter)
+        # can surface event_created/event_id/apr_request_id to the frontend.
+        self.last_creation_result = None
+        # SPIC MACAY coordinator's email for this conversation, once known — auto-CC'd on
+        # payment reminder emails so the coordinator sees what was sent on their behalf.
+        self.current_coordinator_email = None
+        # The uploaded program poster (base64 decoded), if any — carried through to the
+        # APR confirmation email and later attached to payment reminders too.
+        self.pending_poster = None
 #         self.system_prompt = """You are a professional and friendly SPIC MACAY (Society for the Promotion of Indian Classical Music and Culture Amongst Youth) event coordinator assistant.
 
 # Your role is to help users register cultural events by gathering the following information through natural conversation:
@@ -194,11 +206,16 @@ class SPICMacayAgent:
 #
 #       Be helpful, warm, and thorough!"""
 
-        self.system_prompt = """You are an AI assistant for SPIC MACAY (Society for the Promotion of Indian Classical Music and Culture Amongst Youth). Your role is to help users register events and create Artist Payment Reports (APR).
+        self.system_prompt = """You are an AI assistant for SPIC MACAY (Society for the Promotion of Indian Classical Music and Culture Amongst Youth). Your role is to help users register programs and create Artist Payment Requests (APR).
+
+        TERMINOLOGY — IMPORTANT:
+        - SPIC MACAY calls what you are registering a "program" — NEVER say "event" in your replies to the coordinator (internal field names still say "event", that's fine, this is only about what you SAY).
+        - Always spell out "Artist Payment Request (APR)" the first time you mention it in a conversation; "APR" alone is fine after that.
+        - When a coordinator asks to see, list, or search programs/APRs, ALWAYS call the list_programs tool to pull real data from the database — NEVER answer from general knowledge or guess. If list_programs returns nothing relevant, say so plainly rather than inventing programs.
 
         CONVERSATION FLOW:
         1. Greet the user warmly
-        2. Collect ALL required information before creating an event:
+        2. Collect ALL program details (in this order):
         - Event date (YYYY-MM-DD format)
         - Event type/module (e.g., Lecture Demonstration, Workshop, Concert, Baithak)
         - Artist name (search database using search_artists function)
@@ -206,10 +223,12 @@ class SPICMacayAgent:
         - City and State
         - Expected number of attendees
         - Event time (optional but recommended)
-        - Special requirements (optional)
 
-        5. Once you have ALL information, confirm with the user
-        6. Only after confirmation, call create_event with complete event_data
+        5. Once all event details are confirmed, ask for coordinator info LAST:
+        - Coordinator Name (coordinator_name) — the SPIC MACAY coordinator filing this APR
+        - Coordinator Email (coordinator_email) — MANDATORY; the completed APR will be emailed here
+        6. Once you have ALL information including coordinator details, confirm everything with the user
+        7. Only after confirmation, call create_event with complete event_data
         
         		
 		7. IF ARTIST WAS NOT FOUND:
@@ -298,9 +317,64 @@ class SPICMacayAgent:
 			 * Email address
 			 * Phone number
 			 * City and State
-           - Refer database as directory, and if you cant add it, then mention that we will add it subsequently later             
+           - Refer database as directory, and if you cant add it, then mention that we will add it subsequently later
 		   - Call add_new_institution with all details
 		   - Confirm addition before proceeding
+
+        ACCOMPANYING ARTISTS — OPTIONAL:
+        After the main artist is confirmed, ask once: "Will anyone be accompanying [artist name] —
+        e.g. a tabla or harmonium player? This is entirely optional." If the coordinator says no or
+        doesn't answer, move on immediately — never ask more than once or block registration on this.
+
+        If they do name accompanying artist(s), for EACH one:
+        - Collect name and art form/instrument (required for each accompanying artist).
+        - Call search_artists to check if they're already in the directory — accompanying artists
+          live in the SAME artists_list directory as main artists (someone who accompanies today may
+          headline their own program another time).
+        - If found, no further action needed unless the coordinator wants to add bank details for
+          them (see BANK DETAILS below).
+        - If not found, offer to add them via add_new_artist — same optional flow as a main artist,
+          but keep it brief and don't block the program registration if they'd rather skip it.
+        - When calling create_event, include everyone collected in event_data.accompanying_artists as
+          a list of {"name": ..., "art_form": ...} objects.
+
+        BANK DETAILS — OPTIONAL, FOR ANY ARTIST (MAIN OR ACCOMPANYING):
+        - When adding a brand-new artist via add_new_artist, you may optionally also collect their
+          bank_name, account_number and ifsc_code in the same step if the coordinator has them handy
+          — never insist on it.
+        - If an artist already exists in the directory (found via search_artists) and the coordinator
+          wants to add or update their bank details, call update_artist_bank_details with their
+          artist_id (tid) plus bank_name/account_number/ifsc_code.
+        - Bank details are always optional and are only used internally for processing payment — they
+          are not printed on the APR document.
+
+        EVENT/PROGRAM PHOTOS — OPTIONAL:
+        The coordinator may attach photos of the program (e.g. from a poster or the venue) using the
+        attach-photos control in the UI. You don't need to ask for these yourself — if they're
+        attached, they are automatically saved and included with the APR confirmation email once the
+        program is created. You may mention this is available if the coordinator asks about photos.
+
+        PAYMENT REMINDERS TO HOST INSTITUTIONS — OPTIONAL, ALWAYS CONFIRM FIRST:
+        SPIC MACAY periodically reminds host institutions to pay their program contribution via a
+        "Request for Payment" email with a short PDF invoice attached.
+        - Right after a program/APR is successfully created, ask ONCE (optional): "Would you like me
+          to also send a Request for Payment reminder to the institute now?" If declined or ignored,
+          move on — never insist or ask twice.
+        - When the coordinator asks about pending, unpaid, or outstanding payments/contributions —
+          for the program just created or for older programs — ALWAYS call list_pending_payments to
+          pull real data from the database. Never guess or estimate which institutions owe money.
+        - Before EVER calling send_payment_reminder, you must have explicit confirmation from the
+          coordinator on: (1) which program/institution, (2) the recipient email — use the
+          directory's email if on file and confirm it with the coordinator, otherwise ask them for it
+          — and (3) the amount to request. This sends a real email to a real institution; never call
+          it speculatively or without that confirmation.
+        - ALWAYS CC the SPIC MACAY coordinator's own email on every payment reminder, so they see
+          what was sent on their behalf. If they already gave you their email earlier in this
+          conversation (e.g. while creating the APR), it's used automatically — no need to ask again.
+          If you don't have it yet (e.g. reminding about an older program in a fresh conversation),
+          ask "What's your email so I can CC you on this?" before sending.
+        - This can be repeated any time (e.g. once a month) for institutions that still haven't paid —
+          there's no need to wait for anything else to trigger it.
 
         IMPORTANT RULES:
         - Always collect ALL required fields before calling create_event
@@ -314,22 +388,36 @@ class SPICMacayAgent:
         - When calling create_event, include ALL collected information in the event_data parameter
         - Be conversational and helpful, not robotic
         
-        REQUIRED INFORMATION:
-        1. Event Date (start_date)
+        EVENT CATEGORIES — IMPORTANT:
+        Events can be one of two types:
+
+        1. SINGLE EVENT: One artist performs at ONE institution on ONE date.
+           - Collect start_date, institution_name, city, state as usual.
+
+        2. CIRCUIT: One artist performs at MULTIPLE institutions on MULTIPLE different dates.
+           - If a poster shows multiple events across multiple venues, register as Circuit.
+           - Collect ONE artist and art_form (same for all stops).
+           - Collect a list of circuit_events: each stop has date, institution_name, institution_id, city, state.
+           - Do NOT ask for a single start_date — dates come from circuit_events list.
+           - Set event_type: "circuit" when calling create_event.
+           - Use the circuit_events data structure below.
+
+        REQUIRED INFORMATION (collect in this order):
+        1. Event type — Single or Circuit (infer from poster or ask if unclear)
         2. Event Module/Type (from event_module table)
         3. Artist Name (validate against artists_list table)
-        4. Institution/Venue (validate against institution_list table)
-        5. City and State
-        6. Expected number of attendees
-        Other fields as per the event date strcuture may be asked
-        
+        For SINGLE: 4. Event Date, 5. Institution/Venue, 6. City and State
+        For CIRCUIT: 4. Confirm all circuit stops (date + institution + city/state for each)
+        Last: Expected attendees, then Coordinator Name and Email
+
+        7. Coordinator Name (coordinator_name) — collect LAST
+        8. Coordinator Email (coordinator_email) — collect LAST; APR confirmation will be emailed here
+
         OPTIONAL INFORMATION:
         - Event title
-        - Event end date (for multi-day events)
         - Event time
         - Venue details
-        - Budget
-        
+
         CONVERSATION GUIDELINES:
         - Be conversational and natural
         - Ask one question at a time
@@ -337,10 +425,13 @@ class SPICMacayAgent:
         - Provide helpful suggestions when available
         - Confirm details before final registration
         - Be patient and friendly
+        - After creating an event/APR, a PDF download link is included in the result — ALWAYS include it in your response.
 
-        EVENT DATA STRUCTURE:
-        When you call create_event, the event_data parameter MUST include:
+        EVENT DATA STRUCTURE (SINGLE):
         {
+            "event_type": "single",
+            "coordinator_name": "...",
+            "coordinator_email": "...",
             "start_date": "YYYY-MM-DD",
             "event_time": "HH:MM",
             "module_name": "Event Type",
@@ -349,12 +440,27 @@ class SPICMacayAgent:
             "art_form": "Art Form",
             "institution_id": 456,
             "institution_name": "Institution Name",
-            "venue": "Venue Name",
             "city": "City",
             "state": "State",
             "attendees": 100,
-            "title": "Event Title",
-            "description": "Event Description"
+            "title": "Event Title"
+        }
+
+        EVENT DATA STRUCTURE (CIRCUIT):
+        {
+            "event_type": "circuit",
+            "coordinator_name": "...",
+            "coordinator_email": "...",
+            "module_name": "Event Type",
+            "artist_id": 123,
+            "artist_name": "Artist Name",
+            "art_form": "Art Form",
+            "attendees": 100,
+            "title": "Circuit Title",
+            "circuit_events": [
+                {"date": "YYYY-MM-DD", "institution_name": "Inst A", "institution_id": 10, "city": "City A", "state": "State A", "event_time": "10:00"},
+                {"date": "YYYY-MM-DD", "institution_name": "Inst B", "institution_id": 11, "city": "City B", "state": "State B", "event_time": "10:00"}
+            ]
         }
         
 
@@ -424,16 +530,17 @@ class SPICMacayAgent:
         
         greeting = """Namaste! 🙏
 
-I'm here to help you register a SPIC MACAY event APR and create the Artist Payment Report (APR).
+I'm here to help you create an Artist Payment Request (APR) for a SPIC MACAY program.
 
-I'll guide you through the process - we'll need information about:
-- When the event is happening
-- What type of event (Lecture Demonstration, Workshop, etc.)
-- Which artist is performing
-- Where it's taking place
-- Expected number of attendees
+I'll guide you through the process step by step:
+- Program date and type (Concert, Lecture Demonstration, Workshop, etc.)
+- Artist name (plus any accompanying artists) and institution / venue
+- City, state, and expected number of attendees
 
-Would you like to start registering a new event?"""
+You can also upload a program poster and I'll extract these details automatically, and
+you can speak your answers using the microphone at any point.
+
+Let's get started! What is the **date of the program**?"""
         
         self.conversation_history.append({
             "role": "assistant",
@@ -444,13 +551,8 @@ Would you like to start registering a new event?"""
     
     def process_message(self, user_message: str) -> str:
         """
-        Process user message and return response
-        
-        Args:
-            user_message: User's input message
-            
-        Returns:
-            Agent's response
+        Process user message and return response text.
+        The caller (ConversationalAgent / AgentRouter) wraps this in a dict.
         """
         try:
             # Add user message to history
@@ -514,21 +616,34 @@ Would you like to start registering a new event?"""
                     "type": "function",
                     "function": {
                         "name": "create_event",
-                        "description": "Create a new event and APR in the database. Only call this after collecting ALL required information and getting user confirmation.",
+                        "description": "Create a new event (or circuit of events) and APR. Only call after collecting ALL required info and getting user confirmation.",
                         "parameters": {
                             "type": "object",
                             "properties": {
                                 "event_data": {
                                     "type": "object",
-                                    "description": "Complete event information object",
+                                    "description": "Complete event information",
                                     "properties": {
+                                        "event_type": {
+                                            "type": "string",
+                                            "description": "'single' for one venue/date, 'circuit' for multi-venue multi-date",
+                                            "enum": ["single", "circuit"]
+                                        },
+                                        "coordinator_name": {
+                                            "type": "string",
+                                            "description": "SPIC MACAY coordinator name"
+                                        },
+                                        "coordinator_email": {
+                                            "type": "string",
+                                            "description": "Coordinator email — APR confirmation sent here"
+                                        },
                                         "start_date": {
                                             "type": "string",
-                                            "description": "Event date in YYYY-MM-DD format"
+                                            "description": "Event date YYYY-MM-DD (single event only)"
                                         },
                                         "event_time": {
                                             "type": "string",
-                                            "description": "Event time in HH:MM format"
+                                            "description": "Event time HH:MM"
                                         },
                                         "module_name": {
                                             "type": "string",
@@ -536,56 +651,70 @@ Would you like to start registering a new event?"""
                                         },
                                         "artist_id": {
                                             "type": "integer",
-                                            "description": "Artist ID from database search"
+                                            "description": "Artist ID from database"
                                         },
                                         "artist_name": {
                                             "type": "string",
-                                            "description": "Full name of the artist"
+                                            "description": "Full artist name"
                                         },
                                         "art_form": {
                                             "type": "string",
-                                            "description": "Artist's art form (e.g., Sitar, Bharatanatyam)"
+                                            "description": "Art form (e.g. Sitar, Bharatanatyam)"
                                         },
                                         "institution_id": {
                                             "type": "integer",
-                                            "description": "Institution ID from database search"
+                                            "description": "Institution ID (single event only)"
                                         },
                                         "institution_name": {
                                             "type": "string",
-                                            "description": "Full name of the institution"
-                                        },
-                                        "venue": {
-                                            "type": "string",
-                                            "description": "Specific venue/auditorium name"
+                                            "description": "Institution name (single event only)"
                                         },
                                         "city": {
                                             "type": "string",
-                                            "description": "City where event takes place"
+                                            "description": "City (single event only)"
                                         },
                                         "state": {
                                             "type": "string",
-                                            "description": "State where event takes place"
+                                            "description": "State (single event only)"
                                         },
                                         "attendees": {
                                             "type": "integer",
-                                            "description": "Expected number of attendees"
+                                            "description": "Expected attendees"
                                         },
                                         "title": {
                                             "type": "string",
-                                            "description": "Event title/name"
+                                            "description": "Event/series title"
                                         },
-                                        "description": {
-                                            "type": "string",
-                                            "description": "Event description (optional)"
+                                        "circuit_events": {
+                                            "type": "array",
+                                            "description": "Circuit stops (required when event_type='circuit')",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "date":             {"type": "string", "description": "YYYY-MM-DD"},
+                                                    "institution_name": {"type": "string"},
+                                                    "institution_id":   {"type": "integer"},
+                                                    "city":             {"type": "string"},
+                                                    "state":            {"type": "string"},
+                                                    "event_time":       {"type": "string"}
+                                                },
+                                                "required": ["date", "institution_name"]
+                                            }
+                                        },
+                                        "accompanying_artists": {
+                                            "type": "array",
+                                            "description": "Optional list of accompanying artists performing alongside the main artist",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "name":     {"type": "string", "description": "Accompanying artist's full name"},
+                                                    "art_form": {"type": "string", "description": "Their art form/instrument, e.g. Tabla, Harmonium"}
+                                                },
+                                                "required": ["name", "art_form"]
+                                            }
                                         }
                                     },
-                                    "required": [
-                                        "start_date",
-                                        "artist_name",
-                                        "institution_name",
-                                        "city",
-                                        "state"
-                                    ]
+                                    "required": ["artist_name"]
                                 }
                             },
                             "required": ["event_data"]
@@ -642,6 +771,18 @@ Would you like to start registering a new event?"""
                         "artist_type": {
                             "type": "string",
                             "description": "Artist type classification (optional)"
+                        },
+                        "bank_name": {
+                            "type": "string",
+                            "description": "Artist's bank name (optional — only if coordinator has it handy)"
+                        },
+                        "account_number": {
+                            "type": "string",
+                            "description": "Artist's bank account number (optional)"
+                        },
+                        "ifsc_code": {
+                            "type": "string",
+                            "description": "Artist's bank IFSC code (optional)"
                         }
                     },
                     "required": ["name", "art_form", "art_form_category", "city", "state"]
@@ -651,6 +792,115 @@ Would you like to start registering a new event?"""
         }
     }
 },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "update_artist_bank_details",
+                        "description": "Add or update bank account details for an artist (main or accompanying) already in the directory. Use only when the coordinator explicitly wants to provide/update bank details for an artist found via search_artists.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "artist_id": {
+                                    "type": "integer",
+                                    "description": "The artist's ID (tid) from search_artists results"
+                                },
+                                "bank_name":      {"type": "string", "description": "Bank name"},
+                                "account_number": {"type": "string", "description": "Bank account number"},
+                                "ifsc_code":      {"type": "string", "description": "Bank IFSC code"}
+                            },
+                            "required": ["artist_id"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "list_programs",
+                        "description": "Look up REAL upcoming/recent SPIC MACAY programs from the live database. Always use this — never rely on general knowledge or documents — when the coordinator asks to see, list, search, or find programs/events/APRs.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "search_term": {
+                                    "type": "string",
+                                    "description": "Optional keyword to filter by — artist name, institution name, or city"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "description": "Optional status filter, e.g. Pending, Completed, Cancelled"
+                                },
+                                "state": {
+                                    "type": "string",
+                                    "description": "Optional state filter"
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "list_pending_payments",
+                        "description": "Look up REAL programs from the database that don't yet have a contribution receipt on file — candidates for a Request for Payment reminder. Always use this — never guess — when the coordinator asks about pending, unpaid, or outstanding payments/contributions.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "search_term": {
+                                    "type": "string",
+                                    "description": "Optional keyword to filter by — artist name or institution name"
+                                },
+                                "city": {
+                                    "type": "string",
+                                    "description": "Optional city filter"
+                                },
+                                "date_from": {
+                                    "type": "string",
+                                    "description": "Optional start of date range, YYYY-MM-DD"
+                                },
+                                "date_to": {
+                                    "type": "string",
+                                    "description": "Optional end of date range, YYYY-MM-DD — e.g. today's date to only see past/older programs"
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "send_payment_reminder",
+                        "description": "Send a 'Request for Payment' reminder email (with a short PDF invoice attached) to a program's host institution. ONLY call this after the coordinator has explicitly confirmed the recipient email and amount — this sends a real email to a real institution.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "event_id": {
+                                    "type": "integer",
+                                    "description": "The program's event ID (from create_event's result, or from list_programs/list_pending_payments)"
+                                },
+                                "institute_email": {
+                                    "type": "string",
+                                    "description": "Institution's email address. Optional if already on file in the directory — otherwise REQUIRED; ask the coordinator for it first."
+                                },
+                                "amount": {
+                                    "type": "number",
+                                    "description": "Contribution amount in Rupees to request. Optional — falls back to the program's budget figure if omitted."
+                                },
+                                "institute_coordinator_name": {
+                                    "type": "string",
+                                    "description": "Name of the institution's coordinator, for the greeting. Optional — falls back to the directory record if on file."
+                                },
+                                "coordinator_name": {
+                                    "type": "string",
+                                    "description": "SPIC MACAY coordinator's name to sign the email — optional, uses the current conversation's coordinator name if known."
+                                },
+                                "coordinator_email": {
+                                    "type": "string",
+                                    "description": "SPIC MACAY coordinator's email — always CC'd on the reminder. Optional if already known from earlier in this conversation (e.g. they just created this APR); otherwise ask the coordinator for it first."
+                                }
+                            },
+                            "required": ["event_id"]
+                        }
+                    }
+                },
                 {
                     "type": "function",
                     "function": {
@@ -705,8 +955,8 @@ Would you like to start registering a new event?"""
                 "content": assistant_message
             })
             
-            return assistant_message
-            
+            return assistant_message or ''
+
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             return f"I apologize, but I encountered an error: {str(e)}. Could you please try rephrasing your message?"
@@ -764,37 +1014,111 @@ Would you like to start registering a new event?"""
                 
                 elif function_name == "create_event":
                     event_data = function_args.get("event_data", {})
-                    
-                    # LOG WHAT WE RECEIVED
                     logger.info(f"Received event_data: {json.dumps(event_data, indent=2, default=str)}")
-                    
-                    # Validate required fields
-                    required_fields = ['start_date', 'artist_name', 'institution_name', 'city', 'state']
-                    missing_fields = [field for field in required_fields if not event_data.get(field)]
-                    
-                    if missing_fields:
-                        error_msg = f"Missing required fields: {', '.join(missing_fields)}"
-                        logger.error(error_msg)
-                        logger.error(f"Current event_data keys: {list(event_data.keys())}")
-                        result = {
-                            "success": False,
-                            "error": error_msg,
-                            "hint": "Please make sure you have collected all information: date, artist, institution, city, state, and attendees before creating the event."
-                        }
 
+                    ev_type = event_data.get('event_type', 'single')
+                    if ev_type == 'circuit':
+                        circuit_evs = event_data.get('circuit_events') or []
+                        if not circuit_evs:
+                            result = {
+                                "success": False,
+                                "error": "circuit_events list is required for circuit event type.",
+                                "hint": "Please provide circuit_events with date and institution_name for each stop."
+                            }
+                        elif not event_data.get('artist_name'):
+                            result = {
+                                "success": False,
+                                "error": "artist_name is required.",
+                            }
+                        else:
+                            result = self._create_event_and_apr(event_data)
                     else:
-                        result = self._create_event_and_apr(event_data)
-                
-                
-                
+                        required_fields = ['start_date', 'artist_name', 'institution_name', 'city', 'state']
+                        missing_fields = [f for f in required_fields if not event_data.get(f)]
+                        if missing_fields:
+                            error_msg = f"Missing required fields: {', '.join(missing_fields)}"
+                            logger.error(error_msg)
+                            result = {
+                                "success": False,
+                                "error": error_msg,
+                                "hint": "Collect all required info: date, artist, institution, city, state before creating."
+                            }
+                        else:
+                            result = self._create_event_and_apr(event_data)
+                            if isinstance(result, dict) and result.get('success'):
+                                self.last_creation_result = result
+
                 elif function_name == "add_new_artist":
                     artist_data = function_args.get("artist_data", {})
                     result = self.event_service.add_new_artist(artist_data)
 
+                elif function_name == "update_artist_bank_details":
+                    artist_id = function_args.get("artist_id")
+                    bank_data = {
+                        k: function_args.get(k)
+                        for k in ("bank_name", "account_number", "ifsc_code")
+                    }
+                    result = self.event_service.update_artist_bank_details(artist_id, bank_data)
+
+                elif function_name == "list_programs":
+                    filters = {
+                        k: function_args.get(k)
+                        for k in ("search_term", "status", "state") if function_args.get(k)
+                    }
+                    # search_events() expects 'search', not 'search_term'
+                    if 'search_term' in filters:
+                        filters['search'] = filters.pop('search_term')
+                    programs = self.event_service.search_events(filters)
+                    result = {
+                        "success": True,
+                        "count": len(programs),
+                        "programs": [
+                            {
+                                "id":                p.get("id"),
+                                "title":             p.get("title"),
+                                "start_date":        str(p.get("start_date") or ""),
+                                "artist_name":       p.get("artist_name"),
+                                "institution_name":  p.get("institution_name"),
+                                "city":              p.get("city"),
+                                "state":             p.get("state"),
+                                "event_status":      p.get("event_status"),
+                            }
+                            for p in (programs or [])[:15]
+                        ]
+                    }
+
+                elif function_name == "list_pending_payments":
+                    filters = {
+                        k: function_args.get(k)
+                        for k in ("search_term", "city", "date_from", "date_to") if function_args.get(k)
+                    }
+                    if 'search_term' in filters:
+                        filters['search'] = filters.pop('search_term')
+                    pending = self.event_service.get_pending_payment_events(filters)
+                    result = {
+                        "success": True,
+                        "count": len(pending),
+                        "pending_payments": [
+                            {
+                                "event_id":          p.get("id"),
+                                "title":             p.get("title"),
+                                "start_date":        str(p.get("start_date") or ""),
+                                "artist_name":       p.get("artist_name"),
+                                "institution_name":  p.get("institution_name"),
+                                "institution_email": p.get("institution_email"),
+                                "budget":            p.get("budget"),
+                            }
+                            for p in (pending or [])[:15]
+                        ]
+                    }
+
+                elif function_name == "send_payment_reminder":
+                    result = self._send_payment_reminder(function_args)
+
                 elif function_name == "add_new_institution":
                     institution_data = function_args.get("institution_data", {})
                     result = self.event_service.add_new_institution(institution_data)
-                
+
                 else:
                     result = {"error": f"Unknown function: {function_name}"}
                 
@@ -840,132 +1164,598 @@ Would you like to start registering a new event?"""
     
 # Code Generated by Sidekick is for learning and experimentation purposes only.
     # Code Generated by Sidekick is for learning and experimentation purposes only.
+    # ── Poster (image) extraction ─────────────────────────────────────────── #
+
+    def _extract_from_poster(self, image_b64: str, mime_type: str) -> dict:
+        """Use vision model to extract APR fields from an event poster image."""
+        try:
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                max_completion_tokens=1500,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{image_b64}",
+                                "detail": "high"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                "You are extracting event details from a SPIC MACAY event poster "
+                                "to pre-fill an Artist Payment Report (APR).\n\n"
+                                "CIRCUIT VS SINGLE DETECTION:\n"
+                                "• CIRCUIT: the poster shows ONE artist performing at MULTIPLE different "
+                                "institutions on MULTIPLE different dates. Set event_type='circuit' and "
+                                "populate circuit_events with each event's date+institution.\n"
+                                "• SINGLE: one artist, one venue, one date. Set event_type='single' and "
+                                "circuit_events=[].\n\n"
+                                "INSTITUTE CONTEXT: Each poster represents events at specific institutes. "
+                                "Extract all institute names listed on the poster regardless of how their "
+                                "heading reads ('Host', 'Participating', 'Venue', etc.).\n\n"
+                                "SPIC MACAY poster conventions:\n"
+                                "• Artist name: preserve the full honorific — Pt./Pandit, Ustad, Vidushi, "
+                                "Vidwan, Dr., Swami, Shri, Smt., Guru as written on the poster.\n"
+                                "• Art form: use the exact label from the poster.\n"
+                                "• all_institutions: list EVERY institution name found on the poster.\n"
+                                "• institution_name: leave as null — handled separately.\n"
+                                "• city / state: extract from the institute line if visible; else null.\n"
+                                "• start_date: for single = the event date; for circuit = first event date.\n"
+                                "• event_time: start time only in HH:MM 24h.\n"
+                                "• module_name: map to one of: 'Concert', 'Lecture Demonstration', "
+                                "'Workshop', 'Baithak', 'Convention', 'Online Session'.\n\n"
+                                "Return ONLY a valid JSON object with exactly these keys. "
+                                "Use null for fields not visible.\n\n"
+                                '{\n'
+                                '  "title": "series or event name from the poster",\n'
+                                '  "artist_name": "full name with honorific of the main/lead artist",\n'
+                                '  "art_form": "art form as labelled on the poster",\n'
+                                '  "module_name": "Concert | Lecture Demonstration | Workshop | Baithak | Convention | Online Session",\n'
+                                '  "event_type": "single | circuit",\n'
+                                '  "start_date": "YYYY-MM-DD (first date for circuit), or null",\n'
+                                '  "event_time": "HH:MM 24h, or null",\n'
+                                '  "all_institutions": ["Institute Name, City, State", "..."],\n'
+                                '  "circuit_events": [\n'
+                                '    {"date": "YYYY-MM-DD", "institution": "Name", "city": "City", "state": "State"},\n'
+                                '    ...\n'
+                                '  ],\n'
+                                '  "institution_name": null,\n'
+                                '  "venue": "specific hall or auditorium if stated, else null",\n'
+                                '  "city": "city if extractable from single-event institute line, else null",\n'
+                                '  "state": "state if extractable, else null",\n'
+                                '  "attendees": null\n'
+                                '}\n\n'
+                                "Return ONLY the raw JSON. No markdown fences, no explanation."
+                            )
+                        }
+                    ]
+                }]
+            )
+            raw = (resp.choices[0].message.content or '').strip()
+            if '```' in raw:
+                parts = raw.split('```')
+                raw = parts[1] if len(parts) > 1 else raw
+                if raw.lower().startswith('json'):
+                    raw = raw[4:]
+                raw = raw.strip()
+            return json.loads(raw)
+        except Exception as e:
+            logger.error(f"[agent] Poster extraction failed: {e}")
+            return {}
+
+    def process_message_with_image(self, user_message: str, image_b64: str, mime_type: str) -> str:
+        """Handle an event poster image upload. Extracts APR fields via vision and returns
+        a deterministic formatted display of found vs still-needed fields."""
+        # Remember the poster itself (not just the extracted fields) so it can be attached
+        # to the APR confirmation email and, later, to payment reminders for this program.
+        try:
+            import base64
+            ext = (mime_type.split('/')[-1] or 'jpg').split('+')[0]  # e.g. 'jpeg', 'png'
+            self.pending_poster = {
+                'bytes':     base64.b64decode(image_b64),
+                'filename':  f'event_poster.{ext}',
+                'mime_type': mime_type,
+            }
+        except Exception as e:
+            logger.warning(f"Could not decode poster for later attachment: {e}")
+
+        extracted = self._extract_from_poster(image_b64, mime_type)
+
+        event_type_extracted = extracted.get('event_type', 'single') or 'single'
+        circuit_events_extracted = extracted.get('circuit_events') or []
+
+        # ── CIRCUIT PATH ──────────────────────────────────────────────────────
+        if event_type_extracted == 'circuit' and circuit_events_extracted:
+            return self._format_circuit_poster(extracted, circuit_events_extracted, user_message)
+
+        # ── SINGLE EVENT PATH (existing logic) ───────────────────────────────
+        label_map = {
+            'title':       'Programme Title',
+            'artist_name': 'Artist Name',
+            'art_form':    'Art Form',
+            'module_name': 'Event Type',
+            'start_date':  'Event Date',
+            'event_time':  'Event Time',
+            'venue':       'Specific Venue / Auditorium',
+            'attendees':   'Expected Attendees',
+        }
+        required_fields = {
+            'start_date':  'Event Date',
+            'artist_name': 'Artist Name',
+            'art_form':    'Art Form',
+            'module_name': 'Event Type / Module',
+            'attendees':   'Expected Number of Attendees',
+        }
+
+        all_institutions = extracted.get('all_institutions') or []
+        n_inst = len(all_institutions)
+
+        scalar_found = {k: v for k, v in extracted.items()
+                        if v is not None
+                        and k not in ('all_institutions', 'institution_name', 'city', 'state',
+                                      'event_type', 'circuit_events')}
+
+        single_institute = (n_inst == 1)
+        multi_institute  = (n_inst > 1)
+
+        missing = {k: lbl for k, lbl in required_fields.items() if not extracted.get(k)}
+
+        if n_inst == 0:
+            missing['institution_name'] = 'Institution / Venue'
+            missing['city']             = 'City'
+            missing['state']            = 'State'
+        elif single_institute:
+            if not extracted.get('city'):
+                missing['city']  = 'City'
+            if not extracted.get('state'):
+                missing['state'] = 'State'
+
+        if not scalar_found and n_inst == 0:
+            context = (
+                "[User uploaded a poster but no event details could be extracted. "
+                "Ask them to try a clearer image or enter details manually.]"
+            )
+            if user_message:
+                context += f" User note: {user_message}"
+            self.conversation_history.append({"role": "user", "content": context})
+            try:
+                resp = self.client.chat.completions.create(
+                    model=self.model,
+                    temperature=1,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        *self.conversation_history
+                    ]
+                )
+                reply = resp.choices[0].message.content or ''
+                self.conversation_history.append({"role": "assistant", "content": reply})
+                return reply
+            except Exception as e:
+                logger.error(f"[agent] LLM fallback for blank poster failed: {e}")
+                return ("I could not read event details from this image. "
+                        "Please try a clearer photo, or type the event details directly.")
+
+        lines = ["**Poster uploaded — here's what I extracted:**\n"]
+        lines.append("**Extracted from poster:**")
+        for k, v in scalar_found.items():
+            lines.append(f"- **{label_map.get(k, k.replace('_', ' ').title())}**: {v}")
+
+        if single_institute:
+            lines.append(f"- **Institute / Venue**: {all_institutions[0]}")
+            if extracted.get('city'):
+                lines.append(f"- **City**: {extracted['city']}")
+            if extracted.get('state'):
+                lines.append(f"- **State**: {extracted['state']}")
+        elif multi_institute:
+            lines.append(f"- **Institutes on poster** ({n_inst}):")
+            for inst in all_institutions:
+                lines.append(f"  – {inst}")
+
+        needed = []
+        if multi_institute:
+            needed.append("- Which of the above institutes is this APR being filed for? (please specify name, city, and state)")
+        for lbl in missing.values():
+            needed.append(f"- {lbl}")
+
+        if needed:
+            lines.append("\n**Still needed to complete the APR:**")
+            lines.extend(needed)
+        else:
+            lines.append("\nAll required event details extracted! Please confirm to proceed.")
+
+        if user_message:
+            lines.append(f"\n_{user_message}_")
+
+        formatted = "\n".join(lines)
+
+        auto_inst_note = (f"Auto-selected institute (only one on poster): {all_institutions[0]}\n"
+                          if single_institute else "")
+        context_for_llm = (
+            f"[Poster uploaded. Extracted data:\n{json.dumps(extracted, default=str, indent=2)}\n"
+            f"{auto_inst_note}"
+            f"User note: {user_message or 'none'}]"
+        )
+        self.conversation_history.append({"role": "user", "content": context_for_llm})
+        self.conversation_history.append({"role": "assistant", "content": formatted})
+        return formatted
+
+    def _format_circuit_poster(self, extracted: dict, circuit_events: list, user_message: str) -> str:
+        """Format the circuit event display after poster extraction."""
+        lines = ["**Poster uploaded — Circuit Event detected!**\n"]
+        lines.append("**Event Type: Circuit** — artist performing at multiple venues across multiple dates\n")
+
+        if extracted.get('title'):
+            lines.append(f"- **Programme Title**: {extracted['title']}")
+        if extracted.get('artist_name'):
+            lines.append(f"- **Artist**: {extracted['artist_name']}")
+        if extracted.get('art_form'):
+            lines.append(f"- **Art Form**: {extracted['art_form']}")
+        if extracted.get('module_name'):
+            lines.append(f"- **Event Type / Module**: {extracted['module_name']}")
+        if extracted.get('event_time'):
+            lines.append(f"- **Event Time**: {extracted['event_time']}")
+
+        lines.append(f"\n**Circuit Schedule ({len(circuit_events)} events):**")
+        for idx, ce in enumerate(circuit_events, 1):
+            ce_date = ce.get('date', '')
+            try:
+                from datetime import datetime as _dt
+                ce_date = _dt.strptime(ce_date, '%Y-%m-%d').strftime('%d %b %Y')
+            except Exception:
+                pass
+            inst  = ce.get('institution', ce.get('institution_name', 'N/A'))
+            city  = ce.get('city', '')
+            state = ce.get('state', '')
+            loc   = ', '.join(filter(None, [city, state]))
+            lines.append(f"  {idx}. **{ce_date}** — {inst}" + (f", {loc}" if loc else ""))
+
+        missing = []
+        if not extracted.get('attendees'):
+            missing.append("- Expected Attendees (per event)")
+
+        if missing:
+            lines.append("\n**Still needed to complete the APR:**")
+            lines.extend(missing)
+        else:
+            lines.append("\nAll circuit details extracted! Please confirm to proceed.")
+
+        if user_message:
+            lines.append(f"\n_{user_message}_")
+
+        formatted = "\n".join(lines)
+
+        context_for_llm = (
+            f"[Poster uploaded. CIRCUIT EVENT detected. Extracted data:\n"
+            f"{json.dumps(extracted, default=str, indent=2)}\n"
+            f"circuit_events has {len(circuit_events)} stops.\n"
+            f"User note: {user_message or 'none'}]"
+        )
+        self.conversation_history.append({"role": "user", "content": context_for_llm})
+        self.conversation_history.append({"role": "assistant", "content": formatted})
+        return formatted
+
+    # ── Payment reminders ──────────────────────────────────────────────────── #
+
+    def _send_payment_reminder(self, args: dict) -> dict:
+        """Build and send a Request for Payment reminder for one program. Assumes the
+        caller (the LLM, per system prompt) has already confirmed recipient + amount
+        with the coordinator — this function does not ask again. Delegates to
+        EventService.send_payment_reminder(), the single implementation shared with the
+        dashboard's 'Send Payment Reminder' row action."""
+        event_id = args.get('event_id')
+        if not event_id:
+            return {"success": False, "error": "event_id is required"}
+
+        # Always CC the SPIC MACAY coordinator, if known — from this call's args or
+        # remembered from earlier in the conversation (e.g. when the APR was created).
+        coordinator_email = (args.get('coordinator_email') or self.current_coordinator_email or '').strip()
+        if coordinator_email:
+            self.current_coordinator_email = coordinator_email
+
+        return self.event_service.send_payment_reminder(
+            event_id,
+            self.notification_service,
+            institute_email=args.get('institute_email'),
+            amount=args.get('amount'),
+            institute_coordinator_name=args.get('institute_coordinator_name'),
+            coordinator_name=args.get('coordinator_name'),
+            coordinator_email=coordinator_email,
+        )
+
+    # ── Event + APR creation ──────────────────────────────────────────────── #
+
     def _create_event_and_apr(self, event_data: dict) -> dict:
-        """Create event and APR in database"""
+        """Create event(s) and APR in database, generate PDF, send email."""
         try:
             logger.info(f"Creating event with data: {json.dumps(event_data, default=str, indent=2)}")
-            
+
             if not isinstance(event_data, dict):
-                logger.error(f"event_data is not a dictionary: {type(event_data)}")
                 return {"success": False, "error": "Invalid event data format"}
-            
-            required_fields = ['start_date', 'artist_name', 'institution_name', 'city', 'state']
-            missing = [f for f in required_fields if f not in event_data or not event_data[f]]
-            
-            if missing:
-                error_msg = f"Missing required fields: {', '.join(missing)}"
-                logger.error(error_msg)
-                return {"success": False, "error": error_msg}
-            
-            # Prepare data
-            db_event_data = {
-                'event_date': event_data.get('start_date'),
-                'end_date': event_data.get('end_date', event_data.get('start_date')),
-                'event_time': event_data.get('event_time', '18:00'),
-                'module_name': event_data.get('module_name', 'Lecture Demonstration'),
-                'artist_id': event_data.get('artist_id'),
-                'artist_name': event_data.get('artist_name'),
-                'art_form': event_data.get('art_form', 'Music'),
-                'institution_id': event_data.get('institution_id'),
-                'institution_name': event_data.get('institution_name'),
-                'venue': event_data.get('venue', event_data.get('institution_name')),
-                'city': event_data.get('city'),
-                'state': event_data.get('state'),
-                'attendees': event_data.get('attendees', 100),
-                'title': event_data.get('title', f"{event_data.get('artist_name')} at {event_data.get('institution_name')}"),
-                'description': event_data.get('description', ''),
-                'status': 'Scheduled',
-                'created_by': 'AI Assistant'
-            }
-            
-            # Create event - now returns a dict
-            result = self.event_service.create_event(db_event_data)
-            
-            # Check if creation was successful
-            if not result.get('success'):
-                logger.error(f"Event creation failed: {result.get('error')}")
-                return {
-                    "success": False, 
-                    "error": result.get('error', 'Unknown error'),
-                    "message": result.get('message', 'Failed to create event')
+
+            coordinator_name  = (event_data.get('coordinator_name') or
+                                  event_data.get('creator_name', '')).strip()
+            coordinator_email = (event_data.get('coordinator_email') or
+                                  event_data.get('creator_email', '')).strip()
+            if coordinator_email:
+                # Remembered for this conversation so payment reminders can auto-CC them later
+                self.current_coordinator_email = coordinator_email
+
+            event_type     = event_data.get('event_type', 'single')
+            circuit_events = event_data.get('circuit_events') or []
+
+            # Accompanying artists — optional, formatted once for email/DB use
+            accompanying_artists = event_data.get('accompanying_artists') or []
+            accompanying_str = ', '.join(
+                f"{a.get('name', '').strip()} ({a.get('art_form', '').strip()})".strip()
+                for a in accompanying_artists if a.get('name')
+            )
+
+            # ── Base DB record template ───────────────────────────────────────
+            def _base(override=None) -> dict:
+                d = {
+                    'event_date':       event_data.get('start_date'),
+                    'end_date':         event_data.get('end_date', event_data.get('start_date')),
+                    'event_time':       event_data.get('event_time', '18:00'),
+                    'module_name':      event_data.get('module_name', 'Lecture Demonstration'),
+                    'artist_id':        event_data.get('artist_id'),
+                    'artist_name':      event_data.get('artist_name'),
+                    'art_form':         event_data.get('art_form', 'Music'),
+                    'accompanying_artists': accompanying_artists,
+                    'institution_id':   event_data.get('institution_id'),
+                    'institution_name': event_data.get('institution_name'),
+                    'venue':            event_data.get('venue', event_data.get('institution_name')),
+                    'city':             event_data.get('city'),
+                    'state':            event_data.get('state'),
+                    'attendees':        event_data.get('attendees', 100),
+                    'title':            event_data.get('title', f"{event_data.get('artist_name')} — SPIC MACAY"),
+                    'description':      event_data.get('description', ''),
+                    'status':           'Scheduled',
+                    'created_by':       coordinator_name or 'AI Assistant',
+                    'creator_email':    coordinator_email,
                 }
-            
-            event_id = result.get('event_id')
-            logger.info(f"Event created with ID: {event_id}")
-            
-            # Create APR
-            apr_data = None
-            try:
-                apr_data = self.event_service.create_apr(event_id, db_event_data)
-                if apr_data:
-                    logger.info(f"APR created: {apr_data.get('request_id')}")
-                
+                if override:
+                    d.update(override)
+                return d
 
+            # ── CIRCUIT: create one event_list row per stop ───────────────────
+            if event_type == 'circuit' and circuit_events:
+                if not event_data.get('artist_name'):
+                    return {"success": False, "error": "artist_name required for circuit"}
 
-       # ✅ NEW: Send email notification after APR creation
-                try:
-                    # Prepare notification data with ALL required fields
-                    notification_data = {
-                        'event_id': event_id,
-                        'request_id': apr_data.get('request_id'),
-                        'custom_apr': apr_data.get('custom_apr', 'N/A'),
-                        'title': db_event_data.get('title'),
-                        'module_name': db_event_data.get('module_name'),
-                        'artist_name': db_event_data.get('artist_name'),
-                        'art_form': db_event_data.get('art_form'),
-                        'start_date': db_event_data.get('event_date'),
-                        'event_time': db_event_data.get('event_time'),
-                        'institution_name': db_event_data.get('institution_name'),
-                        'venue': db_event_data.get('venue'),
-                        'city': db_event_data.get('city'),
-                        'state': db_event_data.get('state'),
-                        'attendees': db_event_data.get('attendees')
-                    }
-                    
-                    # Get notification recipient from environment or config
-                    # You can set this in your config file or environment variable
-                    recipient_email = self.notification_service.smtp_config.get(
-                        'notification_recipient', 
-                        'smhighereducation@spicmacay.com'  # Default fallback
-                    )
-                    
-                    # Send notification
-                    notification_sent = self.notification_service.send_event_confirmation(
-                        notification_data,
-                        [recipient_email]  # Send to single email
-                    )
-                    
-                    if notification_sent:
-                        logger.info(f" Email notification sent to {recipient_email}")
+                event_ids = []
+                for ce in circuit_events:
+                    ce_data = _base({
+                        'event_date':       ce.get('date', ''),
+                        'end_date':         ce.get('date', ''),
+                        'event_time':       ce.get('event_time', event_data.get('event_time', '18:00')),
+                        'institution_id':   ce.get('institution_id', ''),
+                        'institution_name': ce.get('institution_name', ''),
+                        'venue':            ce.get('institution_name', ''),
+                        'city':             ce.get('city', ''),
+                        'state':            ce.get('state', ''),
+                    })
+                    res = self.event_service.create_event(ce_data)
+                    if res.get('success'):
+                        event_ids.append(res['event_id'])
+                        logger.info(f"Circuit event created: ID {res['event_id']} @ {ce.get('institution_name')}")
                     else:
-                        logger.warning(f" Failed to send email notification to {recipient_email}")
-                        
-                except Exception as email_error:
-                    logger.error(f" Email notification error: {email_error}")
-                    # Don't fail the entire operation if email fails
-                    notification_sent = False
+                        logger.warning(f"Circuit event failed: {res.get('error')}")
 
-            except Exception as apr_error:
-                logger.warning(f"APR creation error: {apr_error}")
-            
+                if not event_ids:
+                    return {"success": False, "error": "No circuit events could be created"}
+
+                # APR date range
+                dates_sorted = sorted([ce.get('date', '') for ce in circuit_events if ce.get('date')])
+                apr_base = _base({
+                    'event_date': dates_sorted[0]  if dates_sorted else '',
+                    'end_date':   dates_sorted[-1] if dates_sorted else '',
+                })
+                apr_data = self.event_service.create_apr(event_ids[0], apr_base)
+                event_id = event_ids[0]
+
+            # ── SINGLE: existing path ─────────────────────────────────────────
+            else:
+                for f in ['start_date', 'artist_name', 'institution_name', 'city', 'state']:
+                    if not event_data.get(f):
+                        return {"success": False, "error": f"Missing required field: {f}"}
+
+                db_event_data = _base()
+                result = self.event_service.create_event(db_event_data)
+                if not result.get('success'):
+                    return {
+                        "success": False,
+                        "error":   result.get('error', 'Unknown error'),
+                        "message": result.get('message', 'Failed to create event'),
+                    }
+                event_id  = result['event_id']
+                event_ids = [event_id]
+                logger.info(f"Single event created with ID: {event_id}")
+
+                apr_data = None
+                try:
+                    apr_data = self.event_service.create_apr(event_id, db_event_data)
+                    if apr_data:
+                        logger.info(f"APR created: {apr_data.get('request_id')}")
+                    else:
+                        logger.warning(f"APR creation returned None for event {event_id}")
+                except Exception as apr_err:
+                    logger.warning(f"APR creation error: {apr_err}")
+
+            # ── PDF generation ────────────────────────────────────────────────
+            pdf_bytes        = b''
+            pdf_path         = ''
+            pdf_download_url = ''
+            if apr_data:
+                try:
+                    from app.services.pdf_service import generate_apr_pdf, save_apr_pdf
+                    pdf_event_data = {
+                        **_base(),
+                        'event_type':     event_type,
+                        'circuit_events': [
+                            {
+                                'date':             ce.get('date', ''),
+                                'institution_name': ce.get('institution_name', ''),
+                                'city':             ce.get('city', ''),
+                                'state':            ce.get('state', ''),
+                                'event_time':       ce.get('event_time', ''),
+                                'module_name':      event_data.get('module_name', ''),
+                            }
+                            for ce in circuit_events
+                        ] if event_type == 'circuit' else [],
+                        'coordinator_name':  coordinator_name,
+                        'coordinator_email': coordinator_email,
+                        'accompanying_artists': accompanying_artists,
+                    }
+                    pdf_bytes = generate_apr_pdf(apr_data, pdf_event_data)
+                    request_id = apr_data.get('request_id', '')
+                    pdf_path   = save_apr_pdf(pdf_bytes, request_id) if pdf_bytes else ''
+                    if pdf_path:
+                        # url_for (not a hardcoded f-string) so the link is correct whether
+                        # the app is served at the domain root or behind a reverse-proxy
+                        # sub-path (e.g. https://spicmacay.in/spicmacay_ai_agent/New_AI_Portal/).
+                        from flask import url_for
+                        pdf_download_url = url_for('agent.download_apr_pdf', request_id=request_id)
+                        logger.info(f"APR PDF generated: {pdf_path}")
+                except Exception as pdf_err:
+                    logger.warning(f"PDF generation failed: {pdf_err}")
+
+            # ── Event/program photos + poster (optional) ─────────────────────────
+            # The uploaded poster (if any) rides along with any explicitly-attached photos —
+            # saved to disk (so it can be re-attached to payment reminders later, even in a
+            # future conversation) and included in the confirmation email now.
+            photo_attachments = []
+            all_photos = list(self.pending_photos)
+            if self.pending_poster:
+                all_photos.insert(0, self.pending_poster)
+
+            if all_photos:
+                try:
+                    from app.services.pdf_service import save_event_photos
+                    photo_paths = save_event_photos(all_photos, event_id)
+                    if photo_paths:
+                        self.event_service.update_event_photos(event_id, photo_paths)
+                        photo_attachments = [p.get('bytes') for p in all_photos if p.get('bytes')]
+                        logger.info(
+                            f"Saved {len(photo_paths)} photo(s) for event {event_id} "
+                            f"(poster included: {bool(self.pending_poster)})"
+                        )
+                except Exception as photo_err:
+                    logger.warning(f"Event photo handling failed: {photo_err}")
+                finally:
+                    self.pending_photos = []
+                    self.pending_poster = None
+
+            # ── Email ─────────────────────────────────────────────────────────
+            coordinator_email_addr = coordinator_email
+            email_note = ''
+            if apr_data:
+                try:
+                    notification_data = {
+                        'event_id':        event_id,
+                        'request_id':      apr_data.get('request_id'),
+                        'custom_apr':      apr_data.get('custom_apr', 'N/A'),
+                        'title':           event_data.get('title', ''),
+                        'module_name':     event_data.get('module_name', ''),
+                        'artist_name':     event_data.get('artist_name', ''),
+                        'art_form':        event_data.get('art_form', ''),
+                        'accompanying_artists': accompanying_str,
+                        'start_date':      event_data.get('start_date', ''),
+                        'event_time':      event_data.get('event_time', ''),
+                        'institution_name':event_data.get('institution_name', ''),
+                        'venue':           event_data.get('venue', ''),
+                        'city':            event_data.get('city', ''),
+                        'state':           event_data.get('state', ''),
+                        'attendees':       event_data.get('attendees', ''),
+                        'coordinator_name':coordinator_name,
+                    }
+                    cc_list    = self.notification_service.smtp_config.get('apr_cc_recipients') or []
+                    recipients = list(cc_list)
+                    if coordinator_email_addr and coordinator_email_addr not in recipients:
+                        recipients.append(coordinator_email_addr)
+
+                    if recipients:
+                        sent = self.notification_service.send_event_confirmation(
+                            notification_data, recipients, pdf_bytes=pdf_bytes,
+                            photo_attachments=photo_attachments
+                        )
+                        if sent:
+                            logger.info(f"APR email sent to: {', '.join(recipients)}")
+                            who = []
+                            if coordinator_email_addr:
+                                who.append(coordinator_email_addr)
+                            if cc_list:
+                                who.append('the finance team')
+                            if who:
+                                email_note = f" Confirmation (with the APR PDF attached) emailed to {' and '.join(who)}."
+                        else:
+                            logger.warning(f"Failed to send APR email to: {', '.join(recipients)}")
+                    else:
+                        logger.warning("No recipients — APR email not sent")
+                except Exception as email_err:
+                    logger.error(f"Email notification error: {email_err}")
+
+            # ── Return result ─────────────────────────────────────────────────
+            apr_id = apr_data.get('request_id') if apr_data else None
+            if event_type == 'circuit':
+                event_summary = f"{len(event_ids)} circuit events (IDs: {', '.join(str(e) for e in event_ids)})"
+            else:
+                event_summary = f"event #{event_id}"
+
+            pdf_note = ' You can download the APR PDF using the button below.' if pdf_download_url else ''
+
             return {
-                "success": True,
-                "event_id": event_id,
-                "apr_request_id": apr_data.get('request_id') if apr_data else None,
-                "message": f"Event #{event_id} created successfully! APR: {apr_data.get('request_id') if apr_data else 'Pending'}"
+                "success":           True,
+                "event_id":          event_id,
+                "event_ids":         event_ids,
+                "apr_request_id":    apr_id,
+                "coordinator_email": coordinator_email_addr,
+                "pdf_path":          pdf_path,
+                "pdf_download_url":  pdf_download_url,
+                "message": (
+                    f"APR #{apr_id or 'Pending'} created successfully for {event_summary}!"
+                    f"{email_note}{pdf_note}"
+                ),
             }
-            
+
         except Exception as e:
             logger.error(f"Error creating event: {str(e)}", exc_info=True)
             return {"success": False, "error": f"System error: {str(e)}"}
 
     
+    def attach_pending_photos(self, photos: list):
+        """
+        Stash optional event/program photos (base64) sent by the client so they
+        can be saved + emailed once the program is actually created. Each item:
+        {"data": "<base64>", "filename": "...", "mime_type": "image/jpeg"}.
+        Replaces any previously-attached, not-yet-used photos.
+        """
+        import base64
+        decoded = []
+        for p in (photos or []):
+            try:
+                decoded.append({
+                    'bytes':     base64.b64decode(p.get('data', '')),
+                    'filename':  p.get('filename') or 'photo.jpg',
+                    'mime_type': p.get('mime_type') or 'image/jpeg',
+                })
+            except Exception as e:
+                logger.warning(f"Skipping unreadable event photo: {e}")
+        self.pending_photos = decoded
+        logger.info(f"Attached {len(decoded)} pending event photo(s)")
+
     def get_conversation_history(self):
         """Get conversation history"""
         return self.conversation_history
-    
+
     def reset_conversation(self):
         """Reset conversation state"""
         self.conversation_history = []
         self.event_data = {}
+        self.pending_photos = []
+        self.last_creation_result = None
+        self.current_coordinator_email = None
+        self.pending_poster = None
         self.state = 'greeting'

@@ -16,7 +16,10 @@
                 </div>
             </div>
             <div class="header-actions">
-                <button class="header-btn" onclick="location.href='/dashboard'" title="Dashboard">
+                <button class="header-btn" onclick="location.href=(window.APP_ROOT||'')+'/'" title="Home">
+                    <i class="fas fa-home"></i>
+                </button>
+                <button class="header-btn" onclick="location.href='./dashboard'" title="Dashboard">
                     <i class="fas fa-chart-line"></i>
                 </button>
                 <button class="header-btn" onclick="resetChat()" title="Reset Chat">

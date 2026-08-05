@@ -214,53 +214,66 @@ class DatabaseValidator:
     def __init__(self, db_manager: DatabaseManager):
         self.db_manager = db_manager
     
+    # Honorifics/salutations not stored in artist DB — strip before searching
+    _HONORIFICS = frozenset([
+        'pt', 'pandit', 'ustad', 'vidushi', 'vidwan', 'vidvan', 'dr', 'swami',
+        'shri', 'smt', 'shrimati', 'guru', 'prof', 'padmashri', 'padmabhushan'
+    ])
+
+    def _clean_artist_search_term(self, name: str) -> str:
+        words = name.strip().split()
+        cleaned = [w for w in words if w.lower().rstrip('.') not in self._HONORIFICS]
+        return ' '.join(cleaned).strip() or name
+
     def search_artists(self, search_term: str) -> List[Dict]:
-        """Search for artists with fuzzy matching"""
+        """Search for artists with fuzzy matching; strips honorifics since DB stores bare names"""
         conn = None
         cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor(dictionary=True)
-            
+
+            clean_term = self._clean_artist_search_term(search_term)
+
             query = """
-                SELECT 
+                SELECT
                     tid, name, art_form, artist_type, artist_grade,
                     city, enter_state, email, phone
                 FROM artists_list
-                WHERE status = 1 
+                WHERE status = 1
                 AND (
-                    name LIKE %s 
+                    name LIKE %s
                     OR art_form LIKE %s
                     OR SOUNDEX(name) = SOUNDEX(%s)
                 )
-                ORDER BY 
-                    CASE 
+                ORDER BY
+                    CASE
                         WHEN name = %s THEN 1
                         WHEN name LIKE %s THEN 2
                         ELSE 3
                     END
                 LIMIT 10
             """
-            
-            search_pattern = f"%{search_term}%"
-            exact_pattern = f"{search_term}%"
-            
+
+            search_pattern = f"%{clean_term}%"
+            exact_pattern = f"{clean_term}%"
+
             cursor.execute(query, (
-                search_pattern, search_pattern, search_term,
-                search_term, exact_pattern
+                search_pattern, search_pattern, clean_term,
+                clean_term, exact_pattern
             ))
-            
+
             results = cursor.fetchall()
-            
-            # Calculate relevance scores
+
+            # Score relevance against the cleaned term so honorifics don't hurt the match ratio
             for result in results:
                 similarity = difflib.SequenceMatcher(
                     None,
-                    search_term.lower(),
+                    clean_term.lower(),
                     result['name'].lower()
                 ).ratio()
                 result['relevance'] = round(similarity, 2)
-            
+
             return sorted(results, key=lambda x: x['relevance'], reverse=True)
             
         except mysql.connector.Error as e:

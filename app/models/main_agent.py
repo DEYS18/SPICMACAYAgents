@@ -174,6 +174,35 @@ class ConversationalAgent:
                 'response': "I apologize, but I encountered an error. Could you please try again?"
             }
     
+    def process_message_with_image(self, user_message: str, image_b64: str, mime_type: str) -> Dict:
+        """Handle an event poster image. Delegates extraction to SPICMacayAgent,
+        then wraps the response string in the standard dict format."""
+        try:
+            response_text = self.agent.process_message_with_image(user_message, image_b64, mime_type)
+            self.conversation_context['agent_type'] = 'event_creation'
+            return {
+                'success': True,
+                'response': response_text,
+                'agent_type': 'event_creation',
+                'conversation_history': self.agent.get_conversation_history(),
+            }
+        except Exception as e:
+            logger.error(f"Error processing poster image: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'agent_type': 'event_creation',
+                'response': "I had trouble reading the poster. Please try a clearer image or type the event details directly.",
+            }
+
+    def attach_pending_photos(self, photos: list):
+        """Passthrough to the SPIC MACAY agent — stash optional event/program photos
+        (base64) sent by the client so they're saved + emailed once the program is created."""
+        try:
+            self.agent.attach_pending_photos(photos)
+        except Exception as e:
+            logger.error(f"Error attaching pending photos: {e}")
+
     def reset_conversation(self):
         """Reset all conversation state"""
         try:

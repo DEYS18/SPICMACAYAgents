@@ -21,32 +21,31 @@ def init_services(app):
     db_manager = DatabaseManager(app.config['DB_CONFIG'])
     event_service = EventService(db_manager)
 
+def _build_filters_from_args():
+    """Build the filters dict expected by EventService.search_events() from query params.
+    Accepts both 'q' (used by dashboard.js) and 'search' as the free-text search key."""
+    filters = {
+        'search': request.args.get('q') or request.args.get('search'),
+        'status': request.args.get('status'),
+        'state': request.args.get('state'),
+        'date_from': request.args.get('date_from'),
+        'date_to': request.args.get('date_to'),
+    }
+    return {k: v for k, v in filters.items() if v}
+
+
 @events_bp.route('/list', methods=['GET'])
 def list_events():
-    """Get list of events with optional filters"""
+    """Get list of programs (events) with optional filters"""
     try:
-        # Get query parameters
-        filters = {
-            'start_date': request.args.get('start_date'),
-            'end_date': request.args.get('end_date'),
-            'state': request.args.get('state'),
-            'chapter': request.args.get('chapter'),
-            'status': request.args.get('status'),
-            'limit': int(request.args.get('limit', 50)),
-            'offset': int(request.args.get('offset', 0))
-        }
-        
-        # Remove None values
-        filters = {k: v for k, v in filters.items() if v is not None}
-        
-        events = event_service.get_events(filters)
-        
+        events = event_service.search_events(_build_filters_from_args())
+
         return jsonify({
             'success': True,
             'events': events,
             'count': len(events)
         })
-        
+
     except Exception as e:
         logger.error(f"Error listing events: {e}")
         return jsonify({
@@ -54,23 +53,63 @@ def list_events():
             'error': str(e)
         }), 500
 
+
+@events_bp.route('/search', methods=['GET'])
+def search_events():
+    """Search programs (events) with filters — used by the dashboard's search bar"""
+    try:
+        events = event_service.search_events(_build_filters_from_args())
+
+        return jsonify({
+            'success': True,
+            'events': events,
+            'count': len(events)
+        })
+
+    except Exception as e:
+        logger.error(f"Error searching events: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@events_bp.route('/states', methods=['GET'])
+def list_states():
+    """Get the distinct list of states with registered programs — used to populate the dashboard filter"""
+    try:
+        states = event_service.get_distinct_states()
+
+        return jsonify({
+            'success': True,
+            'states': states
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching states: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @events_bp.route('/<int:event_id>', methods=['GET'])
 def get_event(event_id):
-    """Get single event by ID"""
+    """Get single program (event) by ID, with full artist/institution/APR details"""
     try:
-        event = event_service.get_event_by_id(event_id)
-        
+        event = event_service.get_event_details(event_id)
+
         if not event:
             return jsonify({
                 'success': False,
                 'error': 'Event not found'
             }), 404
-        
+
         return jsonify({
             'success': True,
             'event': event
         })
-        
+
     except Exception as e:
         logger.error(f"Error fetching event: {e}")
         return jsonify({
@@ -80,31 +119,32 @@ def get_event(event_id):
 
 @events_bp.route('/create', methods=['POST'])
 def create_event():
-    """Create new event"""
+    """Create new program (event). Note: this is a raw DB insert — it does not create the
+    accompanying APR record or send notifications; use the /api/agent/chat assistant for the
+    full program + APR creation flow."""
     try:
         event_data = request.json
-        
+
         if not event_data:
             return jsonify({
                 'success': False,
                 'error': 'No event data provided'
             }), 400
-        
-        # Create event
-        event_id = event_service.create_event(event_data)
-        
-        if not event_id:
+
+        result = event_service.create_event(event_data)
+
+        if not result or not result.get('success'):
             return jsonify({
                 'success': False,
-                'error': 'Failed to create event'
+                'error': (result or {}).get('error', 'Failed to create event')
             }), 500
-        
+
         return jsonify({
             'success': True,
-            'event_id': event_id,
-            'message': 'Event created successfully'
+            'event_id': result.get('event_id'),
+            'message': result.get('message', 'Event created successfully')
         }), 201
-        
+
     except Exception as e:
         logger.error(f"Error creating event: {e}")
         return jsonify({
@@ -167,3 +207,50 @@ def delete_event(event_id):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@events_bp.route('/<int:event_id>/resend-apr-email', methods=['POST'])
+def resend_apr_email(event_id):
+    """Regenerate the APR PDF and re-send the confirmation email — dashboard row action."""
+    try:
+        data = request.json or {}
+        recipient_email = (data.get('email') or '').strip()
+        if not recipient_email:
+            return jsonify({'success': False, 'error': 'Recipient email is required'}), 400
+
+        notification_service = getattr(current_app, 'notification_service', None)
+        if not notification_service:
+            return jsonify({'success': False, 'error': 'Email service not available'}), 500
+
+        result = event_service.resend_apr_email(event_id, recipient_email, notification_service)
+        return jsonify(result), (200 if result.get('success') else 400)
+
+    except Exception as e:
+        logger.error(f"Error resending APR email for event {event_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@events_bp.route('/<int:event_id>/send-payment-reminder', methods=['POST'])
+def send_payment_reminder_route(event_id):
+    """Send a Request for Payment reminder to the host institution — dashboard row action."""
+    try:
+        data = request.json or {}
+
+        notification_service = getattr(current_app, 'notification_service', None)
+        if not notification_service:
+            return jsonify({'success': False, 'error': 'Email service not available'}), 500
+
+        result = event_service.send_payment_reminder(
+            event_id,
+            notification_service,
+            institute_email=data.get('institute_email'),
+            amount=data.get('amount'),
+            institute_coordinator_name=data.get('institute_coordinator_name'),
+            coordinator_name=data.get('coordinator_name'),
+            coordinator_email=data.get('coordinator_email'),
+        )
+        return jsonify(result), (200 if result.get('success') else 400)
+
+    except Exception as e:
+        logger.error(f"Error sending payment reminder for event {event_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500

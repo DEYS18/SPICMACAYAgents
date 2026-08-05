@@ -12,99 +12,203 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <style>
-        :root { --spicmacay-red:#8B0000; --spicmacay-dark:#660000; --spicmacay-light:#DC143C; }
-        body { font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;
-            background:linear-gradient(135deg,#f5f7fa 0%,#c3cfe2 100%); min-height:100vh; padding:20px; }
-        .main-container { max-width:900px; margin:0 auto; }
-        .header { background:linear-gradient(135deg,var(--spicmacay-red) 0%,var(--spicmacay-light) 100%);
-            color:white; padding:24px 30px; border-radius:15px 15px 0 0; position:relative; }
-        .header .back { position:absolute; top:18px; left:20px; color:white; text-decoration:none; opacity:0.9; font-size:0.9rem; }
-        .header .reset { position:absolute; top:14px; right:18px; background:rgba(255,255,255,0.2);
-            border:1px solid rgba(255,255,255,0.3); color:white; padding:7px 14px; border-radius:20px; font-size:0.82rem; cursor:pointer; }
-        .header h1 { margin:6px 0 0 0; font-size:1.7rem; font-weight:700; text-align:center; }
-        .header .tagline { margin:6px 0 0 0; text-align:center; opacity:0.92; font-size:0.95rem; }
+        /* ── SPIC MACAY Brand Palette ───────────────────────────────────── */
+        :root {
+            --sm-red:    #8B0000;   /* deep crimson/maroon */
+            --sm-dark:   #5C0000;   /* darkest maroon */
+            --sm-crimson:#B22222;   /* medium red */
+            --sm-gold:   #C49A00;   /* saffron gold */
+            --sm-gold-lt:#E8C34A;   /* light saffron */
+            --sm-cream:  #FFF8F2;   /* warm page background */
+            --sm-warm:   #FFF2E0;   /* warmer cream (cards, chat bg) */
+            --sm-text:   #2D1A06;   /* warm near-black */
+            --sm-muted:  #7A6050;   /* warm muted text */
+            /* legacy aliases kept so old rules still compile */
+            --spicmacay-red:   var(--sm-red);
+            --spicmacay-dark:  var(--sm-dark);
+            --spicmacay-light: var(--sm-crimson);
+        }
 
-        .chat-container { background:white; border-radius:0 0 15px 15px; box-shadow:0 4px 6px rgba(0,0,0,0.1); overflow:hidden; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(160deg, #FFF0DC 0%, #FAE8CC 50%, #F5DDB8 100%);
+            min-height: 100vh; padding: 20px; color: var(--sm-text);
+        }
+        .main-container { max-width: 920px; margin: 0 auto; }
 
-        /* Guide hero */
-        .guide-hero { display:flex; align-items:center; gap:18px; padding:22px 24px;
-            background:linear-gradient(135deg,#fff6ef 0%,#fdeede 100%); border-bottom:1px solid #f0e2d2; }
-        .guide-hero img { width:84px; height:84px; border-radius:50%; flex-shrink:0;
-            box-shadow:0 3px 10px rgba(139,0,0,0.18); object-fit:cover; background:#fff; }
-        .guide-hero .ghead { font-weight:700; color:var(--spicmacay-red); font-size:1.05rem; }
-        .guide-hero .gsub { color:#6b6b6b; font-size:0.9rem; margin-top:3px; }
+        /* ── Header ─────────────────────────────────────────────────────── */
+        .header {
+            background: linear-gradient(135deg, var(--sm-dark) 0%, var(--sm-red) 55%, var(--sm-crimson) 100%);
+            color: white; padding: 26px 30px; border-radius: 16px 16px 0 0;
+            position: relative; border-bottom: 3px solid var(--sm-gold);
+        }
+        .header::after {
+            content: ''; position: absolute; bottom: -6px; left: 0; right: 0; height: 3px;
+            background: linear-gradient(90deg, var(--sm-gold-lt), var(--sm-gold), var(--sm-gold-lt));
+            border-radius: 0 0 2px 2px;
+        }
+        .header .back { position: absolute; top: 18px; left: 20px; color: rgba(255,255,255,.88); text-decoration: none; font-size: 0.88rem; }
+        .header .back:hover { color: var(--sm-gold-lt); }
+        .header .reset {
+            position: absolute; top: 14px; right: 18px;
+            background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
+            color: white; padding: 7px 14px; border-radius: 20px; font-size: 0.82rem; cursor: pointer;
+        }
+        .header .reset:hover { background: rgba(255,255,255,.25); }
+        .header h1 { margin: 6px 0 0; font-size: 1.75rem; font-weight: 700; text-align: center; letter-spacing: .02em; }
+        .header .tagline { margin: 6px 0 0; text-align: center; opacity: .88; font-size: 0.94rem; }
+        .header .gold-rule { width: 60px; height: 2px; background: var(--sm-gold-lt); margin: 10px auto 0; border-radius: 2px; }
 
-        .chat-messages { height:420px; overflow-y:auto; padding:22px; background:#f8f9fa; }
-        .message { margin-bottom:18px; display:flex; gap:10px; align-items:flex-start; animation:fadeIn .3s ease-in; }
-        @keyframes fadeIn { from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);} }
-        .message.user { flex-direction:row-reverse; }
-        .avatar { width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center;
-            flex-shrink:0; color:white; overflow:hidden; }
-        .avatar img { width:100%; height:100%; object-fit:cover; }
-        .avatar.bot { background:linear-gradient(135deg,var(--spicmacay-red) 0%,var(--spicmacay-light) 100%); }
-        .avatar.user { background:#6c757d; }
-        .bubble-wrap { max-width:74%; }
-        .bubble { padding:12px 17px; border-radius:18px; line-height:1.6; word-wrap:break-word; }
-        .message.bot .bubble { background:#e9ecef; color:#333; border-bottom-left-radius:4px; }
-        .message.user .bubble { background:var(--spicmacay-red); color:white; border-bottom-right-radius:4px; white-space:pre-wrap; }
+        /* ── Chat container ──────────────────────────────────────────────── */
+        .chat-container {
+            background: white; border-radius: 0 0 16px 16px;
+            box-shadow: 0 6px 24px rgba(92,0,0,.12); overflow: hidden;
+        }
 
-        /* Markdown rendering inside bot bubbles */
-        .message.bot .bubble p { margin:0 0 8px; }
-        .message.bot .bubble p:last-child { margin-bottom:0; }
-        .message.bot .bubble ul, .message.bot .bubble ol { margin:6px 0 10px 18px; padding:0; }
-        .message.bot .bubble li { margin-bottom:4px; }
+        /* ── Guide hero ──────────────────────────────────────────────────── */
+        .guide-hero {
+            display: flex; align-items: center; gap: 18px; padding: 20px 24px;
+            background: linear-gradient(135deg, #FFF5E8 0%, #FDEBD0 100%);
+            border-bottom: 2px solid var(--sm-gold-lt);
+        }
+        .guide-hero img {
+            width: 84px; height: 84px; border-radius: 50%; flex-shrink: 0;
+            box-shadow: 0 0 0 3px var(--sm-gold), 0 4px 14px rgba(139,0,0,.22);
+            object-fit: cover; background: #fff;
+        }
+        .guide-hero .ghead { font-weight: 700; color: var(--sm-red); font-size: 1.05rem; }
+        .guide-hero .gsub  { color: var(--sm-muted); font-size: 0.88rem; margin-top: 3px; }
+
+        /* ── Chat messages ───────────────────────────────────────────────── */
+        .chat-messages { height: 440px; overflow-y: auto; padding: 22px; background: var(--sm-warm); }
+        .message { margin-bottom: 18px; display: flex; gap: 10px; align-items: flex-start; animation: fadeIn .3s ease-in; }
+        @keyframes fadeIn { from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:translateY(0); } }
+        .message.user { flex-direction: row-reverse; }
+        .avatar { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: white; overflow: hidden; }
+        .avatar img  { width: 100%; height: 100%; object-fit: cover; }
+        .avatar.bot  { background: linear-gradient(135deg, var(--sm-red) 0%, var(--sm-crimson) 100%); }
+        .avatar.user { background: linear-gradient(135deg, var(--sm-gold) 0%, #A07800 100%); }
+        .bubble-wrap { max-width: 75%; }
+        .bubble { padding: 12px 17px; border-radius: 18px; line-height: 1.65; word-wrap: break-word; }
+        .message.bot  .bubble { background: white; color: var(--sm-text); border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+        .message.user .bubble { background: var(--sm-red); color: white; border-bottom-right-radius: 4px; white-space: pre-wrap; }
+
+        /* Markdown inside bot bubbles */
+        .message.bot .bubble p  { margin: 0 0 8px; }
+        .message.bot .bubble p:last-child { margin-bottom: 0; }
+        .message.bot .bubble ul, .message.bot .bubble ol { margin: 6px 0 10px 18px; padding: 0; }
+        .message.bot .bubble li { margin-bottom: 4px; }
         .message.bot .bubble h1,.message.bot .bubble h2,.message.bot .bubble h3 {
-            font-size:1rem; font-weight:700; margin:12px 0 6px; color:var(--spicmacay-red); }
-        .message.bot .bubble strong { font-weight:700; }
-        .message.bot .bubble em { font-style:italic; }
-        .message.bot .bubble code { background:rgba(0,0,0,0.07); padding:1px 5px; border-radius:4px; font-size:0.88em; }
-        .message.bot .bubble blockquote { border-left:3px solid var(--spicmacay-red); margin:8px 0; padding:4px 12px; opacity:0.85; }
-        .message.bot .bubble hr { border:none; border-top:1px solid #ccc; margin:10px 0; }
-        .message.bot .bubble table { border-collapse:collapse; width:100%; font-size:0.88em; margin:8px 0; }
-        .message.bot .bubble th { background:rgba(139,0,0,0.1); padding:5px 8px; text-align:left; }
-        .message.bot .bubble td { padding:4px 8px; border-bottom:1px solid #ddd; }
-        .sources { margin-top:7px; font-size:0.74rem; color:#6c757d; }
-        .sources .tag { display:inline-block; background:rgba(139,0,0,0.08); color:var(--spicmacay-red);
-            padding:2px 9px; border-radius:10px; margin:2px 4px 0 0; }
-        .sources .tag.linked { background:rgba(139,0,0,0.14); border:1px solid rgba(139,0,0,0.3); }
-        .sources .tag a { color:var(--spicmacay-red); text-decoration:underline; font-weight:600;
-            display:inline-flex; align-items:center; gap:3px; }
-        .sources .tag a:hover { color:var(--spicmacay-dark); text-decoration:underline; }
-        /* Download bar shown when agent generates a document */
-        .download-bar { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
-        .btn-dl { display:inline-flex; align-items:center; gap:5px; padding:6px 14px;
-            border-radius:20px; font-size:0.82rem; font-weight:600; cursor:pointer; border:none;
-            transition:all .2s; }
-        .btn-dl.word { background:#1a73e8; color:white; }
-        .btn-dl.word:hover { background:#1557b0; }
-        .btn-dl.pdf  { background:var(--spicmacay-red); color:white; }
-        .btn-dl.pdf:hover  { background:var(--spicmacay-dark); }
-        .btn-dl:disabled { opacity:0.6; cursor:not-allowed; }
+            font-size: 1rem; font-weight: 700; margin: 12px 0 6px; color: var(--sm-red);
+            padding-left: 8px; border-left: 3px solid var(--sm-gold);
+        }
+        .message.bot .bubble strong   { font-weight: 700; }
+        .message.bot .bubble em       { font-style: italic; }
+        .message.bot .bubble code     { background: rgba(139,0,0,.07); padding: 1px 5px; border-radius: 4px; font-size: .88em; }
+        .message.bot .bubble blockquote { border-left: 3px solid var(--sm-gold); margin: 8px 0; padding: 4px 12px; opacity: .85; background: #FFFAEF; border-radius: 0 8px 8px 0; }
+        .message.bot .bubble hr       { border: none; border-top: 1px solid #E8D5B0; margin: 10px 0; }
+        .message.bot .bubble table    { border-collapse: collapse; width: 100%; font-size: .88em; margin: 8px 0; }
+        .message.bot .bubble th       { background: rgba(196,154,0,.12); padding: 5px 8px; text-align: left; border-bottom: 2px solid var(--sm-gold); }
+        .message.bot .bubble td       { padding: 4px 8px; border-bottom: 1px solid #EADBC0; }
 
-        /* Starter prompt chips */
-        .starters { padding:0 22px 8px; display:flex; flex-wrap:wrap; gap:8px; background:#f8f9fa; }
-        .starter-chip { background:white; border:1px solid var(--spicmacay-red); color:var(--spicmacay-red);
-            border-radius:20px; padding:8px 14px; font-size:0.85rem; cursor:pointer; transition:all .2s; }
-        .starter-chip:hover { background:var(--spicmacay-red); color:white; }
+        /* Sources */
+        .sources { margin-top: 7px; font-size: .74rem; color: var(--sm-muted); }
+        .sources .tag { display: inline-block; background: rgba(139,0,0,.07); color: var(--sm-red); padding: 2px 9px; border-radius: 10px; margin: 2px 4px 0 0; }
+        .sources .tag.linked { background: rgba(196,154,0,.13); border: 1px solid rgba(196,154,0,.45); color: #7A5C00; }
+        .sources .tag a { color: #7A5C00; text-decoration: underline; font-weight: 600; display: inline-flex; align-items: center; gap: 3px; }
+        .sources .tag a:hover { color: var(--sm-red); }
 
-        .typing { display:none; padding:6px 22px 14px; color:#6c757d; font-size:0.85rem; background:#f8f9fa; }
-        .typing.active { display:block; }
-        .input-bar { padding:18px; background:white; border-top:1px solid #dee2e6; display:flex; gap:10px; }
-        #user-input { flex:1; padding:12px 18px; border:2px solid #dee2e6; border-radius:25px; font-size:1rem; resize:none; min-height:50px; max-height:120px; }
-        #user-input:focus { outline:none; border-color:var(--spicmacay-red); }
-        .btn-send { padding:12px 26px; background:var(--spicmacay-red); color:white; border:none; border-radius:25px; font-weight:600; cursor:pointer; height:50px; }
-        .btn-send:hover:not(:disabled){ background:var(--spicmacay-dark); }
-        .btn-send:disabled { background:#6c757d; cursor:not-allowed; }
-        @media(max-width:600px){ .guide-hero img{ width:64px; height:64px; } }
+        /* Download bar */
+        .download-bar { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn-dl { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 20px; font-size: .82rem; font-weight: 600; cursor: pointer; border: none; transition: all .2s; }
+        .btn-dl.word { background: #1a73e8; color: white; }
+        .btn-dl.word:hover { background: #1557b0; }
+        .btn-dl.pdf  { background: var(--sm-red); color: white; }
+        .btn-dl.pdf:hover { background: var(--sm-dark); }
+        .btn-dl:disabled { opacity: .6; cursor: not-allowed; }
+
+        /* Starter chips */
+        .starters { padding: 8px 18px 10px; display: flex; flex-wrap: wrap; gap: 8px; background: #FFF8EE; border-top: 1px solid #F0E0C0; }
+        .starter-chip {
+            background: white; border: 1.5px solid var(--sm-gold); color: #7A5C00;
+            border-radius: 20px; padding: 7px 14px; font-size: .84rem; cursor: pointer; transition: all .2s;
+        }
+        .starter-chip:hover { background: var(--sm-gold); color: white; }
+
+        /* Typing indicator */
+        .typing { display: none; padding: 6px 22px 12px; color: var(--sm-muted); font-size: .85rem; background: #FFF8EE; }
+        .typing.active { display: block; }
+
+        /* ── Input bar ───────────────────────────────────────────────────── */
+        .input-bar { padding: 14px 18px; background: white; border-top: 2px solid #F0E0C0; display: flex; gap: 8px; align-items: flex-end; }
+        #user-input {
+            flex: 1; padding: 12px 18px; border: 2px solid #E8D0A8; border-radius: 25px;
+            font-size: 1rem; resize: none; min-height: 50px; max-height: 120px;
+            background: var(--sm-cream); color: var(--sm-text);
+        }
+        #user-input:focus { outline: none; border-color: var(--sm-gold); box-shadow: 0 0 0 3px rgba(196,154,0,.15); }
+        #user-input::placeholder { color: #BBA080; }
+
+        /* Mic button */
+        .btn-mic {
+            width: 50px; height: 50px; border-radius: 50%; border: none;
+            background: linear-gradient(135deg, var(--sm-gold) 0%, #A07800 100%);
+            color: white; font-size: 1.1rem; cursor: pointer; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            transition: all .2s; box-shadow: 0 2px 8px rgba(196,154,0,.4);
+        }
+        .btn-mic:hover  { transform: scale(1.08); box-shadow: 0 4px 16px rgba(196,154,0,.55); }
+        .btn-mic.listening {
+            background: linear-gradient(135deg, #C0392B 0%, #E53E3E 100%);
+            box-shadow: 0 0 0 0 rgba(197,57,50,.6);
+            animation: micPulse 1.1s infinite;
+        }
+        @keyframes micPulse {
+            0%   { box-shadow: 0 0 0 0   rgba(197,57,50,.6); }
+            70%  { box-shadow: 0 0 0 12px rgba(197,57,50,0); }
+            100% { box-shadow: 0 0 0 0   rgba(197,57,50,0); }
+        }
+        .btn-mic:disabled { opacity: .4; cursor: not-allowed; animation: none; }
+
+        /* TTS button */
+        .btn-speak-toggle {
+            padding: 0 16px; height: 50px; min-width: 50px;
+            background: linear-gradient(135deg, #4facfe 0%, #00c9ff 100%);
+            color: white; border: none; border-radius: 25px; font-size: .84rem;
+            font-weight: 600; cursor: pointer; transition: all .25s; flex-shrink: 0;
+            display: flex; align-items: center; gap: 6px; white-space: nowrap;
+        }
+        .btn-speak-toggle:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(79,172,254,.4); }
+        .btn-speak-toggle.active   { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+        .btn-speak-toggle.speaking { animation: speakPulse .5s infinite; }
+        @keyframes speakPulse { 0%,100%{ transform:scale(1) } 50%{ transform:scale(1.06) } }
+
+        .btn-speak-msg { background: none; border: none; cursor: pointer; color: var(--sm-muted); padding: 3px 6px; border-radius: 50%; font-size: .82rem; transition: color .2s; flex-shrink: 0; }
+        .btn-speak-msg:hover   { color: var(--sm-red); }
+        .btn-speak-msg.speaking { color: #4facfe; animation: speakPulse .5s infinite; }
+
+        /* Send button */
+        .btn-send { padding: 0 22px; height: 50px; background: var(--sm-red); color: white; border: none; border-radius: 25px; font-weight: 700; cursor: pointer; flex-shrink: 0; transition: all .2s; }
+        .btn-send:hover:not(:disabled) { background: var(--sm-dark); }
+        .btn-send:disabled { background: #9C8070; cursor: not-allowed; }
+
+        /* Status bar */
+        .tts-status { font-size: .75rem; color: var(--sm-muted); padding: 2px 18px 0; background: white; min-height: 18px; transition: opacity .3s; }
+
+        @media(max-width:600px){
+            .guide-hero img { width: 60px; height: 60px; }
+            .btn-speak-toggle span { display: none; }
+        }
     </style>
 </head>
 <body>
     <div class="main-container">
         <div class="header">
-            <a class="back" href="/"><i class="fas fa-arrow-left"></i> All agents</a>
+            <a class="back" href="{{ url_for('index') }}"><i class="fas fa-arrow-left"></i> All agents</a>
             <button class="reset" onclick="resetChat()"><i class="fas fa-redo"></i> Reset</button>
             <h1><i class="fas {{ agent.icon }}"></i> {{ agent.title }}</h1>
             <p class="tagline">{{ agent.tagline }}</p>
+            <div class="gold-rule"></div>
         </div>
         <div class="chat-container">
             {% if avatar_url %}
@@ -128,8 +232,15 @@
             {% endif %}
 
             <div class="typing" id="typing"><i class="fas fa-circle-notch fa-spin"></i> Looking through the documents…</div>
+            <div class="tts-status" id="tts-status"></div>
             <div class="input-bar">
-                <textarea id="user-input" rows="1" placeholder="Ask about {{ agent.name }}…" maxlength="1000"></textarea>
+                <textarea id="user-input" rows="1" placeholder="Ask about {{ agent.name }}… or tap 🎤 to speak" maxlength="1000"></textarea>
+                <button class="btn-mic" id="mic-btn" onclick="toggleMic()" title="Speak your question">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <button class="btn-speak-toggle" id="speak-toggle-btn" onclick="toggleAutoSpeak()" title="Toggle auto read-aloud (OpenAI TTS)">
+                    <i class="fas fa-volume-up"></i><span> Read Aloud</span>
+                </button>
                 <button class="btn-send" id="send-btn" onclick="send()"><i class="fas fa-paper-plane"></i> Send</button>
             </div>
         </div>
@@ -137,17 +248,96 @@
 
     <script>
         const AGENT_KEY = "{{ agent.key }}";
-        const API = "/api/knowledge/" + AGENT_KEY;
-        const AVATAR_URL = "{{ avatar_url }}";   // empty string if none
+        const APP_ROOT = "{{ request.script_root }}";
+        const API = APP_ROOT + "/api/knowledge/" + AGENT_KEY;
+        const AVATAR_URL = "{{ avatar_url }}";
         const messagesEl = document.getElementById('messages');
         const inputEl = document.getElementById('user-input');
         const sendBtn = document.getElementById('send-btn');
         const typingEl = document.getElementById('typing');
         const startersEl = document.getElementById('starters');
+        const speakToggleBtn = document.getElementById('speak-toggle-btn');
+        const ttsStatusEl = document.getElementById('tts-status');
 
+        // ── TTS state ─────────────────────────────────────────────────────────
+        let autoSpeak = false;
+        let currentAudio = null;
+        let activeSpeakBtn = null;
+
+        function setTtsStatus(msg){ if (ttsStatusEl) ttsStatusEl.textContent = msg; }
+
+        function toggleAutoSpeak(){
+            autoSpeak = !autoSpeak;
+            if (speakToggleBtn) speakToggleBtn.classList.toggle('active', autoSpeak);
+            if (autoSpeak){
+                setTtsStatus('Auto read-aloud ON — responses will be spoken');
+            } else {
+                setTtsStatus('Auto read-aloud OFF');
+                stopSpeaking();
+            }
+            setTimeout(() => setTtsStatus(''), 2500);
+        }
+
+        function stopSpeaking(){
+            if (currentAudio){ currentAudio.pause(); currentAudio = null; }
+            if (activeSpeakBtn){ activeSpeakBtn.classList.remove('speaking'); activeSpeakBtn = null; }
+            if (speakToggleBtn) speakToggleBtn.classList.remove('speaking');
+        }
+
+        async function speakText(text, triggerBtn){
+            stopSpeaking();
+            const clean = text
+                .replace(/\*\*/g, '').replace(/\*/g, '')
+                .replace(/#{1,6}\s/g, '').replace(/`/g, '')
+                .replace(/\n{2,}/g, ' ').trim()
+                .substring(0, 4000);
+            if (!clean) return;
+
+            if (triggerBtn){ triggerBtn.classList.add('speaking'); activeSpeakBtn = triggerBtn; }
+            if (speakToggleBtn) speakToggleBtn.classList.add('speaking');
+            setTtsStatus('Generating audio…');
+
+            try {
+                const resp = await fetch(APP_ROOT + '/api/voice/speak', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: clean, voice: 'nova', speed: 1.0 })
+                });
+                const data = await resp.json();
+                if (data.success && data.audio_url){
+                    currentAudio = new Audio(data.audio_url);
+                    currentAudio.onplay  = () => setTtsStatus('Speaking…');
+                    currentAudio.onended = () => {
+                        setTtsStatus('');
+                        if (triggerBtn) triggerBtn.classList.remove('speaking');
+                        if (speakToggleBtn) speakToggleBtn.classList.remove('speaking');
+                        currentAudio = null; activeSpeakBtn = null;
+                    };
+                    currentAudio.onerror = () => {
+                        setTtsStatus('Audio playback error');
+                        if (triggerBtn) triggerBtn.classList.remove('speaking');
+                        if (speakToggleBtn) speakToggleBtn.classList.remove('speaking');
+                        currentAudio = null; activeSpeakBtn = null;
+                        setTimeout(() => setTtsStatus(''), 2000);
+                    };
+                    await currentAudio.play();
+                } else {
+                    setTtsStatus('TTS error: ' + (data.error || 'unknown'));
+                    if (triggerBtn) triggerBtn.classList.remove('speaking');
+                    if (speakToggleBtn) speakToggleBtn.classList.remove('speaking');
+                    setTimeout(() => setTtsStatus(''), 2500);
+                }
+            } catch(e){
+                setTtsStatus('TTS request failed');
+                if (triggerBtn) triggerBtn.classList.remove('speaking');
+                if (speakToggleBtn) speakToggleBtn.classList.remove('speaking');
+                setTimeout(() => setTtsStatus(''), 2500);
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
-        // Render markdown safely for bot messages
         function renderMarkdown(text){
             if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') return escapeHtml(text);
             return DOMPurify.sanitize(marked.parse(text));
@@ -159,7 +349,6 @@
                 : '<div class="avatar bot"><i class="fas fa-robot"></i></div>';
         }
 
-        // Tracks the content + title of the last bot message for download
         let _lastDocContent = '';
         let _lastDocTitle   = 'SPIC MACAY Convention Guide Response';
 
@@ -167,26 +356,23 @@
             const wrap = document.createElement('div');
             wrap.className = 'message ' + who;
 
-            // ── Avatar ───────────────────────────────────────────────────────
             const avatarDiv = document.createElement('div');
             avatarDiv.innerHTML = who === 'bot' ? botAvatarHtml()
                 : '<div class="avatar user"><i class="fas fa-user"></i></div>';
             wrap.appendChild(avatarDiv.firstChild);
 
-            // ── Bubble wrapper ───────────────────────────────────────────────
             const bubbleWrap = document.createElement('div');
             bubbleWrap.className = 'bubble-wrap';
 
             const bubble = document.createElement('div');
             bubble.className = 'bubble';
             if (who === 'bot') {
-                bubble.innerHTML = renderMarkdown(text);   // safe — DOMPurify'd
+                bubble.innerHTML = renderMarkdown(text);
             } else {
                 bubble.textContent = text;
             }
             bubbleWrap.appendChild(bubble);
 
-            // ── Sources ──────────────────────────────────────────────────────
             if (sources && sources.length) {
                 const srcDiv = document.createElement('div');
                 srcDiv.className = 'sources';
@@ -198,11 +384,8 @@
                     if (url) {
                         chip.className = 'tag linked';
                         const a = document.createElement('a');
-                        a.href = url;
-                        a.target = '_blank';
-                        a.rel = 'noopener noreferrer';
-                        a.innerHTML = '<i class="fas fa-external-link-alt" style="font-size:0.7em;margin-right:3px;"></i>'
-                            + escapeHtml(name);
+                        a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+                        a.innerHTML = '<i class="fas fa-external-link-alt" style="font-size:0.7em;margin-right:3px;"></i>' + escapeHtml(name);
                         chip.appendChild(a);
                     } else {
                         chip.className = 'tag';
@@ -213,11 +396,19 @@
                 bubbleWrap.appendChild(srcDiv);
             }
 
-            // ── Download bar — every bot response ────────────────────────────
             if (who === 'bot') {
                 const dlTitle = (docMeta && docMeta.doc_title) || _lastDocTitle || 'Convention_Guide_Response';
                 const dlBar = document.createElement('div');
                 dlBar.className = 'download-bar';
+
+                // ── Per-message speak button ──────────────────────────────────
+                const capturedText = text;
+                const btnSpeak = document.createElement('button');
+                btnSpeak.className = 'btn-dl btn-speak-msg';
+                btnSpeak.style.cssText = 'background:none;border:1px solid #4facfe;color:#4facfe;padding:5px 12px;border-radius:20px;';
+                btnSpeak.innerHTML = '<i class="fas fa-volume-up"></i> Listen';
+                btnSpeak.title = 'Read this response aloud';
+                btnSpeak.addEventListener('click', () => speakText(capturedText, btnSpeak));
 
                 const btnWord = document.createElement('button');
                 btnWord.className = 'btn-dl word';
@@ -229,6 +420,7 @@
                 btnPdf.innerHTML = '<i class="fas fa-file-pdf"></i> Download as PDF';
                 btnPdf.addEventListener('click', function(){ downloadDoc('pdf', dlTitle, this); });
 
+                dlBar.appendChild(btnSpeak);
                 dlBar.appendChild(btnWord);
                 dlBar.appendChild(btnPdf);
                 bubbleWrap.appendChild(dlBar);
@@ -288,18 +480,19 @@
                 const reply = d.response && d.response.trim()
                     ? d.response
                     : (d.success === false ? (d.error || 'Something went wrong. Please try again.') : 'I found documents but couldn\'t generate a response. Could you rephrase your question?');
-                // Always keep the latest bot reply available for download
                 _lastDocContent = reply;
                 _lastDocTitle   = (d.doc_title) ? d.doc_title
                     : (text.length < 80 ? text.replace(/[^a-zA-Z0-9 ]/g,'').trim() : 'Convention_Guide_Response')
                     || 'Convention_Guide_Response';
                 addMessage(reply, 'bot', d.sources, d);
+                if (autoSpeak) speakText(reply, null);
             } catch(e){
                 addMessage('Network error. Please try again.', 'bot');
             } finally { setBusy(false); }
         }
 
         async function resetChat(){
+            stopSpeaking();
             await fetch(API + '/reset', { method:'POST' });
             messagesEl.innerHTML = '';
             if (startersEl) startersEl.style.display = 'flex';
@@ -319,6 +512,75 @@
         inputEl.addEventListener('keydown', e => {
             if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }
         });
+
+        // ── Speech Recognition (Web Speech API — browser-native, no key needed) ──
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const micBtn = document.getElementById('mic-btn');
+        let recognition = null;
+        let isListening = false;
+
+        if (!SpeechRecognition) {
+            // Browser doesn't support mic — hide button gracefully
+            if (micBtn) micBtn.style.display = 'none';
+        } else {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'en-IN';
+            recognition.continuous = false;
+            recognition.interimResults = true;
+
+            recognition.onstart = function() {
+                isListening = true;
+                if (micBtn) { micBtn.classList.add('listening'); micBtn.title = 'Listening… (tap to stop)'; }
+                setTtsStatus('Listening… speak your question');
+                stopSpeaking();
+            };
+
+            recognition.onresult = function(e) {
+                const transcript = Array.from(e.results)
+                    .map(r => r[0].transcript)
+                    .join('');
+                inputEl.value = transcript;
+                // Auto-resize textarea
+                inputEl.style.height = 'auto';
+                inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+            };
+
+            recognition.onend = function() {
+                isListening = false;
+                if (micBtn) { micBtn.classList.remove('listening'); micBtn.title = 'Speak your question'; }
+                setTtsStatus('');
+                // Auto-send if text was captured
+                if (inputEl.value.trim()) send();
+            };
+
+            recognition.onerror = function(e) {
+                isListening = false;
+                if (micBtn) micBtn.classList.remove('listening');
+                const msgs = {
+                    'no-speech':   'No speech detected — tap the mic and try again.',
+                    'not-allowed': 'Microphone access denied. Allow mic access in your browser settings.',
+                    'network':     'Network error during speech recognition.',
+                    'aborted':     ''
+                };
+                const msg = msgs[e.error] !== undefined ? msgs[e.error] : 'Speech recognition error. Please try again.';
+                if (msg) { setTtsStatus(msg); setTimeout(() => setTtsStatus(''), 3500); }
+            };
+        }
+
+        function toggleMic() {
+            if (!recognition) return;
+            if (isListening) {
+                recognition.stop();
+            } else {
+                try {
+                    recognition.start();
+                } catch(err) {
+                    setTtsStatus('Could not start microphone. Please try again.');
+                    setTimeout(() => setTtsStatus(''), 3000);
+                }
+            }
+        }
+
         start();
     </script>
 </body>

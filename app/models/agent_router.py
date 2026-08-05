@@ -85,7 +85,7 @@ class AgentRouter:
             logger.debug(" Staying in event creation flow (context)")
             return True
         
-        # Event creation keywords
+        # Event/program creation keywords
         event_keywords = [
             'register event',
             'create event',
@@ -99,12 +99,50 @@ class AgentRouter:
             'plan event',
             'register an event',
             'create an event',
+            'register program',
+            'create program',
+            'register a program',
+            'create a program',
+            'new program',
             'want to register',
             'want to create',
             'need to register',
             'need to create',
             'apr',                # Artist Payment Request
-            'artist payment'
+            'artist payment',
+            # Listing/lookup intents — must stay in this agent so answers come from
+            # the live database, not the general-knowledge RAG workflow agent.
+            'show event',
+            'show events',
+            'show program',
+            'show programs',
+            'upcoming event',
+            'upcoming events',
+            'upcoming program',
+            'upcoming programs',
+            'list event',
+            'list events',
+            'list program',
+            'list programs',
+            'view event',
+            'view events',
+            'view program',
+            'view programs',
+            'find event',
+            'find program',
+            'search event',
+            'search program',
+            'my apr',
+            'recent apr',
+            # Payment reminder intents
+            'pending payment',
+            'payment pending',
+            'payment reminder',
+            'outstanding payment',
+            'unpaid contribution',
+            'contribution payment',
+            'request for payment',
+            'send payment',
         ]
         
         is_event = any(keyword in query for keyword in event_keywords)
@@ -135,14 +173,26 @@ class AgentRouter:
         try:
             # Process through SPIC MACAY agent
             response_text = self.agent.process_message(query)
-            
-            return {
+
+            result = {
                 'success': True,
                 'response': response_text,
                 'agent_type': 'event_creation',
                 'conversation_history': self.agent.get_conversation_history()
             }
-            
+
+            # Surface a successful program/APR creation to the frontend (consumed once,
+            # then cleared) — lets chat.js show a success toast and flush attached photos.
+            creation = getattr(self.agent, 'last_creation_result', None)
+            if creation:
+                result['event_created'] = True
+                result['event_id'] = creation.get('event_id')
+                result['apr_request_id'] = creation.get('apr_request_id')
+                result['pdf_download_url'] = creation.get('pdf_download_url')
+                self.agent.last_creation_result = None
+
+            return result
+
         except Exception as e:
             logger.error(f"SPIC MACAY agent error: {e}")
             return {

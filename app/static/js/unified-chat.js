@@ -422,9 +422,12 @@ class UnifiedChatInterface extends ChatInterface {
         }, 2000);
     }
     
-    async speakText(text) {
-        if (!this.autoSpeak) return;
-        
+    async speakText(text, force = false) {
+        // `force` bypasses the auto-speak toggle — used once for the opening Hindi
+        // greeting so first-time coordinators hear a spoken welcome even if they
+        // haven't turned auto-speak on yet.
+        if (!this.autoSpeak && !force) return;
+
         try {
             console.log('[Voice] Generating speech...');
             
@@ -487,6 +490,20 @@ class UnifiedChatInterface extends ChatInterface {
     async _afterBotResponse(data) {
         if (this.autoSpeak && data.response) {
             await this.speakText(data.response);
+        }
+    }
+
+    // Speak the opening Hindi greeting aloud once, the first time the assistant loads —
+    // browsers may block this without a prior user gesture (e.g. clicking in from the
+    // home page usually counts; a hard refresh on this exact page may not) — that's a
+    // browser autoplay restriction, not a bug, so failures here are swallowed quietly.
+    async _afterSessionStart(data) {
+        if (data && data.response) {
+            try {
+                await this.speakText(data.response, /* force */ true);
+            } catch (e) {
+                console.log('[Voice] Autoplay of opening greeting was blocked by the browser:', e);
+            }
         }
     }
 }

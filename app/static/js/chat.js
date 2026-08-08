@@ -104,8 +104,12 @@ class ChatInterface {
                     response: data.response,
                     agent_type: data.agent_type
                 };
-                
+
                 console.log('[ChatInterface] Welcome screen will remain until first user message');
+
+                // Extension point: UnifiedChatInterface reads the Hindi greeting aloud once
+                // here, regardless of the auto-speak toggle (a one-time spoken welcome).
+                this._afterSessionStart(data);
                 
             } else {
                 console.error('[ChatInterface] ❌ Failed to start:', data.error);
@@ -209,8 +213,10 @@ class ChatInterface {
                 // Update current agent type
                 this.currentAgentType = data.agent_type;
                 
-                // Display bot response with agent type (attach a PDF download button if one is ready)
-                this.displayMessage(data.response, 'bot', data.agent_type, data.pdf_download_url);
+                // Display bot response with agent type (attach a download button — APR PDF
+                // or generated poster, whichever this reply produced — if one is ready)
+                this.displayMessage(data.response, 'bot', data.agent_type,
+                    data.poster_download_url || data.pdf_download_url);
                 
                 // Show which agent is responding
                 this.showAgentIndicator(data.agent_type);
@@ -326,13 +332,17 @@ class ChatInterface {
         
         contentDiv.appendChild(bubble);
 
-        // PDF download button — a real clickable UI element, not just a link in the text
+        // Download button — a real clickable UI element, not just a link in the text.
+        // Same button style for both an APR PDF and a generated poster image.
         if (sender === 'bot' && downloadUrl) {
+            const isPoster = downloadUrl.includes('/poster/download/');
             const downloadBtn = document.createElement('a');
             downloadBtn.className = 'apr-download-btn';
             downloadBtn.href = downloadUrl;
             downloadBtn.setAttribute('download', '');
-            downloadBtn.innerHTML = '<i class="fas fa-file-pdf"></i> Download APR PDF';
+            downloadBtn.innerHTML = isPoster
+                ? '<i class="fas fa-image"></i> Download Poster'
+                : '<i class="fas fa-file-pdf"></i> Download APR PDF';
             contentDiv.appendChild(downloadBtn);
         }
 
@@ -452,6 +462,9 @@ class ChatInterface {
     // Extension point for subclasses (e.g. UnifiedChatInterface adds auto-speak here)
     // instead of re-implementing sendMessage() from scratch.
     async _afterBotResponse(data) {}
+
+    // Extension point: fires once, right after the opening greeting is fetched.
+    async _afterSessionStart(data) {}
 
     // ── Poster image helpers ─────────────────────────────────────────────── //
 

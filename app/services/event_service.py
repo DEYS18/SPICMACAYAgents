@@ -191,11 +191,92 @@ class EventService:
                 'custom_apr': custom_apr,
                 'status': 'Pending'
             }
-            
+
         except Exception as e:
             logger.error(f"Error creating APR: {e}", exc_info=True)
             return None
-    
+
+    def create_apr_for_group(self, event_ids: List[int], event_data: dict) -> Optional[dict]:
+        """
+        Create ONE shared APR reference (request_id + custom_apr) covering MULTIPLE
+        event_list rows — used for both Circuits (1 artist, many institutions) and
+        Virasats (many artists/modules, 1 institution).
+
+        apr_payment_request has a single event_id foreign key per row, not a join table,
+        so a series can't be linked with one row alone. This inserts one
+        apr_payment_request row per event_id, all sharing the same request_id/custom_apr —
+        so every event in the series correctly resolves its shared APR reference wherever
+        the code joins on apr.event_id = event_list.id (payment reminders, resend-email,
+        dashboard listings), not just the first stop.
+
+        Args:
+            event_ids:  All event_list.id values belonging to this one APR
+            event_data: Shared event info (artist_id/institution_name/chapter/etc.) —
+                        for a Virasat, pass the info common to the whole series; per-row
+                        specifics (artist, module) live on event_list itself.
+
+        Returns:
+            {'request_id', 'custom_apr', 'status'} — same shape as create_apr() — or None.
+        """
+        if not event_ids:
+            return None
+        try:
+            event_date = event_data.get('event_date') or event_data.get('start_date', '')
+            request_id = self._generate_request_id()
+            custom_apr = f"APR-{event_ids[0]}-{datetime.now().strftime('%Y%m%d')}"
+            current_date = datetime.now().strftime('%Y-%m-%d')
+
+            max_id_result = self.db.fetch_one(
+                "SELECT COALESCE(MAX(id), 0) AS max_id FROM apr_payment_request"
+            )
+            next_apr_id = (int(max_id_result['max_id']) + 1) if max_id_result else 1
+
+            query = """
+            INSERT INTO apr_payment_request (
+                id, request_id, artist_id, event_id, custom_apr,
+                event_date, time_duration, institution, chapter,
+                students, fc, created_by, dt_created, del, updated_by
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s
+            )
+            """
+            for event_id in event_ids:
+                values = (
+                    next_apr_id,
+                    request_id,
+                    str(event_data.get('artist_id', '')),
+                    str(event_id),
+                    custom_apr,
+                    event_date,
+                    event_data.get('event_time', ''),
+                    event_data.get('institution_name', ''),
+                    event_data.get('chapter', ''),
+                    event_data.get('attendees', 300),
+                    '',  # fc field
+                    event_data.get('created_by', 'System'),
+                    current_date,
+                    event_data.get('created_by', 'System'),
+                )
+                result = self.db.execute_query(query, values, commit=True)
+                if not result or not result.get('success'):
+                    logger.error(
+                        f"Failed to link event {event_id} to APR {request_id}: "
+                        f"{result.get('error') if result else 'Unknown error'}"
+                    )
+                    return None
+                next_apr_id += 1
+
+            logger.info(f"APR {request_id} created, linked to {len(event_ids)} event(s): {event_ids}")
+            return {
+                'request_id': request_id,
+                'custom_apr': custom_apr,
+                'status': 'Pending'
+            }
+
+        except Exception as e:
+            logger.error(f"Error creating grouped APR: {e}", exc_info=True)
+            return None
+
     def add_new_artist(self, artist_data: dict) -> dict:
         """
         Add a new artist to the database
@@ -657,6 +738,13 @@ class EventService:
             'coordinator_name':           coordinator_name or 'SPIC MACAY Team',
             'chapter':                    ev.get('chapter') or '',
             'institute_coordinator_name': institute_coordinator_name,
+            # Carried through so the reminder email can show full program context,
+            # not just the PDF invoice.
+            'institution_name':           ev.get('institution_name', 'N/A'),
+            'module_name':                ev.get('module_name', 'Program'),
+            'artist_name':                ev.get('artist_name', 'N/A'),
+            'event_date':                 str(ev.get('start_date') or ''),
+            'request_id':                 ev.get('request_id') or '',
         }
         event_data_for_pdf = {
             'institution_name': ev.get('institution_name', 'N/A'),
@@ -963,6 +1051,92 @@ class EventService:
         except Exception as e:
             logger.error(f"Error fetching dashboard stats: {e}")
             return {}
+
+    # ── Weekly report data ────────────────────────────────────────────────
+
+    def get_events_added_this_week(self) -> List[Dict]:
+        """Programs whose event_list row was created (added_date) in the last 7 days —
+        the 'new programs logged this week' figure for the weekly events report."""
+        try:
+            query = """
+                SELECT
+                    e.id, e.title, e.start_date, e.added_date, e.event_status,
+                    e.event_category AS module_name, e.city, e.state,
+                    a.name AS artist_name, i.institution_name
+                FROM event_list e
+                LEFT JOIN artists_list a ON e.artist = a.tid
+                LEFT JOIN institution_list i ON e.institution = i.sid
+                WHERE e.status = 1 AND e.added_date >= (CURDATE() - INTERVAL 7 DAY)
+                ORDER BY e.added_date DESC, e.id DESC
+            """
+            return self.db.fetch_all(query)
+        except Exception as e:
+            logger.error(f"Error fetching events added this week: {e}")
+            return []
+
+    def get_academic_year_to_date_stats(self) -> Dict:
+        """Cumulative program count for the current SPIC MACAY academic year (Apr–Mar),
+        up to today — the 'what's happened so far' figure for the weekly events report.
+        Same Apr–Mar FY convention used by create_event() and get_dashboard_stats()."""
+        try:
+            today = datetime.now()
+            if today.month >= 4:
+                current_fy = f"{today.year}-{today.year + 1}"
+            else:
+                current_fy = f"{today.year - 1}-{today.year}"
+
+            total_result = self.db.fetch_one(
+                "SELECT COUNT(*) AS count FROM event_list WHERE status = 1 AND fy = %s",
+                (current_fy,)
+            )
+            by_status = self.db.fetch_all(
+                """
+                SELECT event_status, COUNT(*) AS count
+                FROM event_list
+                WHERE status = 1 AND fy = %s
+                GROUP BY event_status
+                """,
+                (current_fy,)
+            )
+
+            return {
+                'academic_year': current_fy,
+                'total_events': total_result['count'] if total_result else 0,
+                'events_by_status': by_status,
+            }
+        except Exception as e:
+            logger.error(f"Error fetching academic-year-to-date stats: {e}")
+            return {'academic_year': '', 'total_events': 0, 'events_by_status': []}
+
+    def get_artists_added_this_week(self) -> List[Dict]:
+        """Artists added to the directory (added_date) in the last 7 days."""
+        try:
+            query = """
+                SELECT tid, name, art_form, city, enter_state AS state, email, phone, added_date
+                FROM artists_list
+                WHERE status = 1 AND added_date >= (CURDATE() - INTERVAL 7 DAY)
+                ORDER BY added_date DESC, tid DESC
+            """
+            return self.db.fetch_all(query)
+        except Exception as e:
+            logger.error(f"Error fetching artists added this week: {e}")
+            return []
+
+    def get_all_artists(self) -> List[Dict]:
+        """The full active artist directory — for the weekly artist report's
+        'complete directory' attachment."""
+        try:
+            query = """
+                SELECT tid, name, art_form, city, enter_state AS state, email, phone,
+                       artist_type, artist_grade, added_date
+                FROM artists_list
+                WHERE status = 1
+                ORDER BY name ASC
+            """
+            return self.db.fetch_all(query)
+        except Exception as e:
+            logger.error(f"Error fetching full artist directory: {e}")
+            return []
 
     def get_distinct_states(self) -> List[str]:
         """Get the distinct list of states with registered programs, for dashboard filters"""

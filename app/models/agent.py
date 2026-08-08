@@ -6,6 +6,7 @@ Main agent logic using OpenAI GPT-4
 from openai import OpenAI
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -58,6 +59,9 @@ class SPICMacayAgent:
         # The uploaded program poster (base64 decoded), if any — carried through to the
         # APR confirmation email and later attached to payment reminders too.
         self.pending_poster = None
+        # Set after a successful generate_poster tool call so AgentRouter can surface
+        # poster_download_url to the frontend, same pattern as last_creation_result.
+        self.last_poster_result = None
 #         self.system_prompt = """You are a professional and friendly SPIC MACAY (Society for the Promotion of Indian Classical Music and Culture Amongst Youth) event coordinator assistant.
 
 # Your role is to help users register cultural events by gathering the following information through natural conversation:
@@ -213,6 +217,17 @@ class SPICMacayAgent:
         - Always spell out "Artist Payment Request (APR)" the first time you mention it in a conversation; "APR" alone is fine after that.
         - When a coordinator asks to see, list, or search programs/APRs, ALWAYS call the list_programs tool to pull real data from the database — NEVER answer from general knowledge or guess. If list_programs returns nothing relevant, say so plainly rather than inventing programs.
 
+        LANGUAGE — SPEAK THE COORDINATOR'S LANGUAGE, STORE IN ENGLISH:
+        - The conversation opens with a Hindi welcome. ALWAYS reply in whatever language the
+          coordinator uses — Hindi, English, Hinglish, Tamil, Bengali, Marathi, or any other.
+          If they answer in Hindi, continue in Hindi; if they switch, switch with them.
+        - If they state a language preference, honour it for the rest of the conversation.
+        - CRITICAL: no matter what language you are CONVERSING in, every value you pass to a
+          tool — artist names, institution names, city, state, module/program type, titles — must
+          be written in ENGLISH (transliterate Indian names into Latin script, e.g. "पंडित रवि शंकर"
+          → "Pandit Ravi Shankar", "दिल्ली" → "Delhi"). Everything stored in the database and
+          printed on the APR is always English.
+
         CONVERSATION FLOW:
         1. Greet the user warmly
         2. Collect ALL program details (in this order):
@@ -221,8 +236,28 @@ class SPICMacayAgent:
         - Artist name (search database using search_artists function)
         - Institution/venue name (search database using search_institutions function)
         - City and State
-        - Expected number of attendees
         - Event time (optional but recommended)
+
+        NUMBER OF ATTENDEES — DEFAULT 300, DON'T ASK UPFRONT:
+        Do NOT ask "how many attendees are expected?" as a question during collection. Assume the
+        standard default of 300 and simply SHOW it in the final confirmation summary as
+        "Expected attendees: 300 (default)". If the coordinator wants a different figure they can
+        say so at the confirmation step — then use their number. Only ever pass a number you were
+        actually given, or 300, in event_data.attendees.
+
+        CITY & STATE — PROPOSE A BEST GUESS INSTEAD OF ASKING BLIND:
+        If the poster or the coordinator hasn't given you the city/state, but you DO have the
+        institution's name, don't just ask "which city?". Most SPIC MACAY host institutions are
+        well-known schools, colleges and universities — use what you know about that institution
+        to propose a best guess for confirmation, e.g.:
+          "I don't have the location yet. Based on the name, I believe **Lodha World School** is in
+           **Thane, Maharashtra** — is that right, or should I correct it?"
+        Rules for this:
+        - ALWAYS present it as a guess to confirm, never as established fact.
+        - If you genuinely don't recognise the institution, say so and ask plainly — never invent
+          a plausible-sounding city just to fill the field.
+        - The coordinator's answer always wins over your guess.
+        - Note: this is your own knowledge of the institution, not a live web lookup.
 
         5. Once all event details are confirmed, ask for coordinator info LAST:
         - Coordinator Name (coordinator_name) — the SPIC MACAY coordinator filing this APR
@@ -364,10 +399,15 @@ class SPICMacayAgent:
           for the program just created or for older programs — ALWAYS call list_pending_payments to
           pull real data from the database. Never guess or estimate which institutions owe money.
         - Before EVER calling send_payment_reminder, you must have explicit confirmation from the
-          coordinator on: (1) which program/institution, (2) the recipient email — use the
-          directory's email if on file and confirm it with the coordinator, otherwise ask them for it
-          — and (3) the amount to request. This sends a real email to a real institution; never call
-          it speculatively or without that confirmation.
+          coordinator on: (1) which program/institution, (2) the recipient email, and (3) the amount
+          to request. This sends a real email to a real institution; never call it speculatively or
+          without that confirmation.
+        - FINDING THE RECIPIENT EMAIL — always SHOW the actual address, never just say "confirm the
+          email": the institution's email (from search_institutions, or already visible from earlier
+          in this conversation) is right there in your context — quote it back explicitly, e.g. "I
+          have j.sharma@lodhaworldschool.in on file for Lodha World School — should I send the
+          reminder there?" If there's no email on file, say so plainly and ask the coordinator for
+          one — never invent or guess an email address.
         - ALWAYS CC the SPIC MACAY coordinator's own email on every payment reminder, so they see
           what was sent on their behalf. If they already gave you their email earlier in this
           conversation (e.g. while creating the APR), it's used automatically — no need to ask again.
@@ -375,6 +415,26 @@ class SPICMacayAgent:
           ask "What's your email so I can CC you on this?" before sending.
         - This can be repeated any time (e.g. once a month) for institutions that still haven't paid —
           there's no need to wait for anything else to trigger it.
+
+        POSTER GENERATION — ONLY WHEN EXPLICITLY REQUESTED:
+        You can generate a SPIC MACAY-branded poster image for a program from its details —
+        artist, institution, date, venue, art form/module. This is a distinct, optional
+        capability, separate from creating an APR.
+        - ONLY call generate_poster when the coordinator explicitly asks for a poster (e.g.
+          "generate a poster", "make me a poster for this", clicking the Generate Poster
+          button/card). NEVER call it automatically after create_event, or just because you
+          now have enough details to make one — always wait to be asked.
+        - You need at least artist_name and institution_name; use whatever else you already
+          have from this conversation (date, venue, art form, module, city/state,
+          accompanying artists). If those two essentials are missing, ask for them first.
+        - If the coordinator is asking about a program already created earlier, pass its
+          event_id — any details you also pass explicitly take priority over what's on file.
+        - This never touches the database — generating a poster doesn't create or modify a
+          program/APR, and creating a program/APR doesn't require a poster.
+        - There is no photo compositing here — this poster is generated from text details
+          alone, not from an uploaded image. If the coordinator uploaded a poster image
+          instead of asking you to generate one, that's the separate poster-upload/extraction
+          flow — don't confuse the two.
 
         IMPORTANT RULES:
         - Always collect ALL required fields before calling create_event
@@ -389,7 +449,7 @@ class SPICMacayAgent:
         - Be conversational and helpful, not robotic
         
         EVENT CATEGORIES — IMPORTANT:
-        Events can be one of two types:
+        Events can be one of three types:
 
         1. SINGLE EVENT: One artist performs at ONE institution on ONE date.
            - Collect start_date, institution_name, city, state as usual.
@@ -402,13 +462,34 @@ class SPICMacayAgent:
            - Set event_type: "circuit" when calling create_event.
            - Use the circuit_events data structure below.
 
+        3. VIRASAT: the INVERSE of a circuit — MULTIPLE artists/modules perform at ONE
+           institution (a multi-day festival: concerts, workshops, lecture-demonstrations by
+           different performers, all hosted by the same school/college/university).
+           - Recognise a Virasat poster by: one institution name, but several different
+             artist names paired with different dates/modules (concert on one date, a
+             different artist's workshop on another, etc.) — NOT the same artist repeated.
+           - Collect the ONE shared institution_name/institution_id/city/state at the top
+             level of event_data (like a single event would).
+           - Collect a list of virasat_events: each performance has date, artist_name,
+             artist_id (search_artists per performer, same as any other artist), art_form,
+             module_name.
+           - Do NOT ask for a single top-level artist_name or module_name — those live per
+             performance inside virasat_events.
+           - Set event_type: "virasat" when calling create_event.
+           - Technical model, for your own reference: Circuit = 1 artist → many
+             institutions → 1 APR → many DB rows. Virasat = many artists/modules →
+             1 institution → 1 APR → many DB rows. Either way, exactly ONE APR number and
+             ONE consolidated PDF cover the whole series — you don't need to do anything
+             special to make that happen, create_event handles it.
+
         REQUIRED INFORMATION (collect in this order):
         1. Event type — Single or Circuit (infer from poster or ask if unclear)
         2. Event Module/Type (from event_module table)
         3. Artist Name (validate against artists_list table)
         For SINGLE: 4. Event Date, 5. Institution/Venue, 6. City and State
         For CIRCUIT: 4. Confirm all circuit stops (date + institution + city/state for each)
-        Last: Expected attendees, then Coordinator Name and Email
+        Last: Coordinator Name and Email (attendees is NOT collected here — it defaults to
+        300 and is only shown, not asked, at final confirmation — see NUMBER OF ATTENDEES above)
 
         7. Coordinator Name (coordinator_name) — collect LAST
         8. Coordinator Email (coordinator_email) — collect LAST; APR confirmation will be emailed here
@@ -522,31 +603,46 @@ class SPICMacayAgent:
         Be helpful, warm, and thorough!"""
 
     
+    # Spoken Hindi welcome — read aloud once when the assistant first loads, so
+    # coordinators are greeted in their own language. The coordinator may reply in
+    # ANY language from there; everything written to the database stays in English.
+    HINDI_GREETING_SPOKEN = (
+        "नमस्कार! स्पिक मैके ए.पी.आर. रजिस्ट्रेशन असिस्टेंट में आपका स्वागत है। "
+        "मैं आपकी कैसे सहायता कर सकता हूँ? मुझसे बात करने के लिए आप नीचे दिए गए माइक आइकन को दबा सकते हैं। "
+        "वैसे, आप किस भाषा में बातचीत करना पसंद करेंगे?"
+    )
+
     def start_conversation(self) -> str:
         """Start a new conversation"""
         self.conversation_history = []
         self.event_data = {}
         self.state = 'greeting'
-        
-        greeting = """Namaste! 🙏
 
-I'm here to help you create an Artist Payment Request (APR) for a SPIC MACAY program.
+        greeting = """नमस्कार! 🙏
 
-I'll guide you through the process step by step:
+**स्पिक मैके APR रजिस्ट्रेशन असिस्टेंट में आपका स्वागत है।**
+मैं आपकी कैसे सहायता कर सकता हूँ? मुझसे बात करने के लिए आप नीचे दिए गए 🎤 **माइक आइकन** को दबा सकते हैं।
+**वैसे, आप किस भाषा में बातचीत करना पसंद करेंगे?** (हिंदी, English, या कोई और भाषा — जो आपको सुविधाजनक लगे)
+
+---
+
+*Welcome! I'm here to help you create an Artist Payment Request (APR) for a SPIC MACAY program.*
+
+I'll guide you through it step by step:
 - Program date and type (Concert, Lecture Demonstration, Workshop, etc.)
 - Artist name (plus any accompanying artists) and institution / venue
-- City, state, and expected number of attendees
+- City and state
 
-You can also upload a program poster and I'll extract these details automatically, and
-you can speak your answers using the microphone at any point.
+You can also **upload a program poster** and I'll extract these details automatically,
+**speak** your answers using the microphone, or ask me to **generate a poster** for a program.
 
-Let's get started! What is the **date of the program**?"""
-        
+Let's begin — what is the **date of the program**? आप हिंदी में भी उत्तर दे सकते हैं।"""
+
         self.conversation_history.append({
             "role": "assistant",
             "content": greeting
         })
-        
+
         return greeting
     
     def process_message(self, user_message: str) -> str:
@@ -626,8 +722,8 @@ Let's get started! What is the **date of the program**?"""
                                     "properties": {
                                         "event_type": {
                                             "type": "string",
-                                            "description": "'single' for one venue/date, 'circuit' for multi-venue multi-date",
-                                            "enum": ["single", "circuit"]
+                                            "description": "'single' for one artist/one venue/one date. 'circuit' for ONE artist performing at MULTIPLE institutions (multi-venue, multi-date). 'virasat' for the inverse — MULTIPLE artists/modules at ONE institution, e.g. a multi-day festival of concerts and workshops by different performers hosted by a single school/college.",
+                                            "enum": ["single", "circuit", "virasat"]
                                         },
                                         "coordinator_name": {
                                             "type": "string",
@@ -679,7 +775,7 @@ Let's get started! What is the **date of the program**?"""
                                         },
                                         "attendees": {
                                             "type": "integer",
-                                            "description": "Expected attendees"
+                                            "description": "Expected attendees. Optional — defaults to 300 if omitted; only include a different number if the coordinator specified one."
                                         },
                                         "title": {
                                             "type": "string",
@@ -687,7 +783,7 @@ Let's get started! What is the **date of the program**?"""
                                         },
                                         "circuit_events": {
                                             "type": "array",
-                                            "description": "Circuit stops (required when event_type='circuit')",
+                                            "description": "Circuit stops — REQUIRED when event_type='circuit', one artist visiting multiple institutions. Each stop becomes its own program row; all stops share one APR.",
                                             "items": {
                                                 "type": "object",
                                                 "properties": {
@@ -701,9 +797,25 @@ Let's get started! What is the **date of the program**?"""
                                                 "required": ["date", "institution_name"]
                                             }
                                         },
+                                        "virasat_events": {
+                                            "type": "array",
+                                            "description": "Virasat performances — REQUIRED when event_type='virasat', multiple artists/modules at ONE institution (given via the top-level institution_name/city/state). Each performance becomes its own program row; all performances share one APR.",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "date":        {"type": "string", "description": "YYYY-MM-DD"},
+                                                    "artist_name": {"type": "string"},
+                                                    "artist_id":   {"type": "integer"},
+                                                    "art_form":    {"type": "string"},
+                                                    "module_name": {"type": "string", "description": "e.g. Concert, Workshop, Lecture Demonstration"},
+                                                    "event_time":  {"type": "string"}
+                                                },
+                                                "required": ["date", "artist_name", "module_name"]
+                                            }
+                                        },
                                         "accompanying_artists": {
                                             "type": "array",
-                                            "description": "Optional list of accompanying artists performing alongside the main artist",
+                                            "description": "Optional list of accompanying artists performing alongside the main artist (single/circuit only — not used for virasat, where each performance already names its own artist)",
                                             "items": {
                                                 "type": "object",
                                                 "properties": {
@@ -713,8 +825,7 @@ Let's get started! What is the **date of the program**?"""
                                                 "required": ["name", "art_form"]
                                             }
                                         }
-                                    },
-                                    "required": ["artist_name"]
+                                    }
                                 }
                             },
                             "required": ["event_data"]
@@ -898,6 +1009,37 @@ Let's get started! What is the **date of the program**?"""
                                 }
                             },
                             "required": ["event_id"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "generate_poster",
+                        "description": "Generate a SPIC MACAY-branded poster image (JPEG) for a program from its details — either an existing program (pass event_id) or details discussed in this conversation that haven't necessarily been saved as an APR yet. ONLY call this when the coordinator explicitly asks for a poster, or clicks the 'Generate Poster' action — NEVER automatically after creating an APR.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "event_id": {
+                                    "type": "integer",
+                                    "description": "Optional — if generating a poster for an already-created program, its event ID. Any details also passed explicitly below take priority over what's on file."
+                                },
+                                "institution_name": {"type": "string", "description": "Host institution — required if event_id is not given"},
+                                "artist_name":       {"type": "string", "description": "Main artist — required if event_id is not given"},
+                                "art_form":          {"type": "string"},
+                                "module_name":       {"type": "string", "description": "e.g. Concert, Workshop, Lecture Demonstration"},
+                                "start_date":        {"type": "string", "description": "YYYY-MM-DD"},
+                                "event_time":        {"type": "string"},
+                                "venue":             {"type": "string"},
+                                "city":              {"type": "string"},
+                                "state":             {"type": "string"},
+                                "chapter":           {"type": "string"},
+                                "accompanying_artists": {
+                                    "type": "array",
+                                    "description": "Names of accompanying artists, if any (plain names — not the {name, art_form} objects used by create_event)",
+                                    "items": {"type": "string"}
+                                }
+                            }
                         }
                     }
                 },
@@ -1115,6 +1257,9 @@ Let's get started! What is the **date of the program**?"""
                 elif function_name == "send_payment_reminder":
                     result = self._send_payment_reminder(function_args)
 
+                elif function_name == "generate_poster":
+                    result = self._generate_poster(function_args)
+
                 elif function_name == "add_new_institution":
                     institution_data = function_args.get("institution_data", {})
                     result = self.event_service.add_new_institution(institution_data)
@@ -1187,12 +1332,20 @@ Let's get started! What is the **date of the program**?"""
                             "text": (
                                 "You are extracting event details from a SPIC MACAY event poster "
                                 "to pre-fill an Artist Payment Report (APR).\n\n"
-                                "CIRCUIT VS SINGLE DETECTION:\n"
+                                "SINGLE VS CIRCUIT VS VIRASAT DETECTION:\n"
                                 "• CIRCUIT: the poster shows ONE artist performing at MULTIPLE different "
                                 "institutions on MULTIPLE different dates. Set event_type='circuit' and "
-                                "populate circuit_events with each event's date+institution.\n"
+                                "populate circuit_events with each event's date+institution; leave "
+                                "virasat_events=[].\n"
+                                "• VIRASAT: the INVERSE of a circuit — the poster shows ONE institution "
+                                "hosting MULTIPLE DIFFERENT artists/performances (a festival schedule: "
+                                "different names paired with different dates/modules — concerts, "
+                                "workshops, lecture-demonstrations by different people). Set "
+                                "event_type='virasat' and populate virasat_events with each performance's "
+                                "date+artist_name+art_form+module_name; leave circuit_events=[]. Put the "
+                                "one shared institution in all_institutions (single entry).\n"
                                 "• SINGLE: one artist, one venue, one date. Set event_type='single' and "
-                                "circuit_events=[].\n\n"
+                                "circuit_events=[], virasat_events=[].\n\n"
                                 "INSTITUTE CONTEXT: Each poster represents events at specific institutes. "
                                 "Extract all institute names listed on the poster regardless of how their "
                                 "heading reads ('Host', 'Participating', 'Venue', etc.).\n\n"
@@ -1214,12 +1367,16 @@ Let's get started! What is the **date of the program**?"""
                                 '  "artist_name": "full name with honorific of the main/lead artist",\n'
                                 '  "art_form": "art form as labelled on the poster",\n'
                                 '  "module_name": "Concert | Lecture Demonstration | Workshop | Baithak | Convention | Online Session",\n'
-                                '  "event_type": "single | circuit",\n'
-                                '  "start_date": "YYYY-MM-DD (first date for circuit), or null",\n'
+                                '  "event_type": "single | circuit | virasat",\n'
+                                '  "start_date": "YYYY-MM-DD (first date for circuit/virasat), or null",\n'
                                 '  "event_time": "HH:MM 24h, or null",\n'
                                 '  "all_institutions": ["Institute Name, City, State", "..."],\n'
                                 '  "circuit_events": [\n'
                                 '    {"date": "YYYY-MM-DD", "institution": "Name", "city": "City", "state": "State"},\n'
+                                '    ...\n'
+                                '  ],\n'
+                                '  "virasat_events": [\n'
+                                '    {"date": "YYYY-MM-DD", "artist_name": "Full Name", "art_form": "...", "module_name": "Concert | Workshop | ..."},\n'
                                 '    ...\n'
                                 '  ],\n'
                                 '  "institution_name": null,\n'
@@ -1266,10 +1423,15 @@ Let's get started! What is the **date of the program**?"""
 
         event_type_extracted = extracted.get('event_type', 'single') or 'single'
         circuit_events_extracted = extracted.get('circuit_events') or []
+        virasat_events_extracted = extracted.get('virasat_events') or []
 
         # ── CIRCUIT PATH ──────────────────────────────────────────────────────
         if event_type_extracted == 'circuit' and circuit_events_extracted:
             return self._format_circuit_poster(extracted, circuit_events_extracted, user_message)
+
+        # ── VIRASAT PATH ─────────────────────────────────────────────────────
+        if event_type_extracted == 'virasat' and virasat_events_extracted:
+            return self._format_virasat_poster(extracted, virasat_events_extracted, user_message)
 
         # ── SINGLE EVENT PATH (existing logic) ───────────────────────────────
         label_map = {
@@ -1287,7 +1449,7 @@ Let's get started! What is the **date of the program**?"""
             'artist_name': 'Artist Name',
             'art_form':    'Art Form',
             'module_name': 'Event Type / Module',
-            'attendees':   'Expected Number of Attendees',
+            # attendees is NOT required — it defaults to 300 and is only shown, not asked
         }
 
         all_institutions = extracted.get('all_institutions') or []
@@ -1412,9 +1574,9 @@ Let's get started! What is the **date of the program**?"""
             loc   = ', '.join(filter(None, [city, state]))
             lines.append(f"  {idx}. **{ce_date}** — {inst}" + (f", {loc}" if loc else ""))
 
+        # Attendees is no longer a blocking field — it defaults to 300 per program and is
+        # only mentioned at final confirmation, not asked upfront.
         missing = []
-        if not extracted.get('attendees'):
-            missing.append("- Expected Attendees (per event)")
 
         if missing:
             lines.append("\n**Still needed to complete the APR:**")
@@ -1431,6 +1593,60 @@ Let's get started! What is the **date of the program**?"""
             f"[Poster uploaded. CIRCUIT EVENT detected. Extracted data:\n"
             f"{json.dumps(extracted, default=str, indent=2)}\n"
             f"circuit_events has {len(circuit_events)} stops.\n"
+            f"User note: {user_message or 'none'}]"
+        )
+        self.conversation_history.append({"role": "user", "content": context_for_llm})
+        self.conversation_history.append({"role": "assistant", "content": formatted})
+        return formatted
+
+    def _format_virasat_poster(self, extracted: dict, virasat_events: list, user_message: str) -> str:
+        """Format the Virasat event display after poster extraction — the inverse of a
+        circuit: one institution, multiple artists/modules."""
+        lines = ["**Poster uploaded — Virasat Series detected!**\n"]
+        lines.append("**Event Type: Virasat** — one institution hosting multiple artists/modules\n")
+
+        if extracted.get('title'):
+            lines.append(f"- **Programme Title**: {extracted['title']}")
+
+        all_institutions = extracted.get('all_institutions') or []
+        if all_institutions:
+            lines.append(f"- **Host Institution**: {all_institutions[0]}")
+
+        lines.append(f"\n**Virasat Schedule ({len(virasat_events)} performances):**")
+        for idx, ve in enumerate(virasat_events, 1):
+            ve_date = ve.get('date', '')
+            try:
+                from datetime import datetime as _dt
+                ve_date = _dt.strptime(ve_date, '%Y-%m-%d').strftime('%d %b %Y')
+            except Exception:
+                pass
+            artist = ve.get('artist_name', 'N/A')
+            module = ve.get('module_name', '')
+            art_form = ve.get('art_form', '')
+            detail = ', '.join(filter(None, [module, art_form]))
+            lines.append(f"  {idx}. **{ve_date}** — {artist}" + (f" ({detail})" if detail else ""))
+
+        # Attendees defaults to 300 and city/state come from the one shared institution —
+        # neither blocks confirmation here.
+        missing = []
+        if len(all_institutions) != 1:
+            missing.append("- Which institution is hosting this Virasat series? (please specify name, city, and state)")
+
+        if missing:
+            lines.append("\n**Still needed to complete the APR:**")
+            lines.extend(missing)
+        else:
+            lines.append("\nAll Virasat details extracted! Please confirm to proceed.")
+
+        if user_message:
+            lines.append(f"\n_{user_message}_")
+
+        formatted = "\n".join(lines)
+
+        context_for_llm = (
+            f"[Poster uploaded. VIRASAT EVENT detected. Extracted data:\n"
+            f"{json.dumps(extracted, default=str, indent=2)}\n"
+            f"virasat_events has {len(virasat_events)} performances.\n"
             f"User note: {user_message or 'none'}]"
         )
         self.conversation_history.append({"role": "user", "content": context_for_llm})
@@ -1465,7 +1681,103 @@ Let's get started! What is the **date of the program**?"""
             coordinator_email=coordinator_email,
         )
 
+    # ── Poster generation ────────────────────────────────────────────────── #
+
+    def _generate_poster(self, args: dict) -> dict:
+        """Generate a SPIC MACAY-branded poster image from program details — always
+        explicit/on-request (per system prompt), never triggered automatically. Details
+        can come from this conversation, an existing event_id, or both (explicit args
+        win over what's on file for that event)."""
+        import os
+        import uuid
+
+        event_id = args.get('event_id')
+        poster_data = {k: v for k, v in args.items() if k != 'event_id' and v is not None}
+
+        if event_id:
+            ev = self.event_service.get_event_for_resend(event_id)
+            if ev:
+                defaults = {
+                    'institution_name': ev.get('institution_name'),
+                    'artist_name':      ev.get('artist_name'),
+                    'art_form':         ev.get('art_form'),
+                    'module_name':      ev.get('module_name'),
+                    'start_date':       str(ev.get('start_date') or ''),
+                    'event_time':       ev.get('event_time'),
+                    'venue':            ev.get('venue'),
+                    'city':             ev.get('city'),
+                    'state':            ev.get('state'),
+                    'chapter':          ev.get('chapter'),
+                }
+                for k, v in defaults.items():
+                    if v:
+                        poster_data.setdefault(k, v)
+
+        if not poster_data.get('artist_name') or not poster_data.get('institution_name'):
+            return {
+                "success": False,
+                "error": "Need at least the artist name and institution to generate a poster.",
+                "hint": "Ask the coordinator for whichever of these is still missing."
+            }
+
+        try:
+            from app.services.poster_service import generate_program_poster, save_poster
+            poster_bytes = generate_program_poster(poster_data)
+            if not poster_bytes:
+                return {"success": False, "error": "Poster generation failed — image library unavailable on the server."}
+
+            poster_key = event_id or f"draft-{uuid.uuid4().hex[:8]}"
+            poster_path = save_poster(poster_bytes, poster_key)
+
+            poster_download_url = ''
+            if poster_path:
+                from flask import url_for
+                poster_download_url = url_for('agent.download_poster', filename=os.path.basename(poster_path))
+                self.last_poster_result = {"poster_download_url": poster_download_url}
+
+            return {
+                "success": True,
+                "poster_download_url": poster_download_url,
+                "message": ("Poster generated! You can download it using the button below."
+                            if poster_download_url else
+                            "Poster generated, but it could not be saved for download — please try again."),
+            }
+        except Exception as e:
+            logger.error(f"Poster generation error: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
     # ── Event + APR creation ──────────────────────────────────────────────── #
+
+    def _fire_weekly_reports_async(self):
+        """Send both weekly recap reports right now, in a background thread so it doesn't
+        delay the APR-creation response. A testing aid for checking the reports without
+        waiting for the weekly schedule — the scheduled job in app/__init__.py keeps
+        running as normal alongside this; toggle off via SEND_WEEKLY_REPORTS_ON_APR_CREATE.
+        """
+        import threading
+        from flask import current_app
+
+        # Read config while still on the request's thread (Flask's current_app proxy only
+        # resolves inside an active app/request context — the background thread has neither).
+        try:
+            events_recipients = list(current_app.config.get('WEEKLY_EVENTS_REPORT_RECIPIENTS', []))
+            artist_recipients = list(current_app.config.get('WEEKLY_ARTIST_REPORT_RECIPIENTS', []))
+        except Exception as e:
+            logger.warning(f"Could not read weekly report recipients — skipping post-APR trigger: {e}")
+            return
+
+        def _run():
+            try:
+                from app.services.report_service import send_weekly_reports
+                logger.info("Firing weekly reports after APR creation (testing aid)...")
+                send_weekly_reports(
+                    self.event_service, self.notification_service,
+                    events_recipients, artist_recipients
+                )
+            except Exception as e:
+                logger.error(f"Error sending post-APR-creation weekly reports: {e}", exc_info=True)
+
+        threading.Thread(target=_run, daemon=True, name='post-apr-weekly-reports').start()
 
     def _create_event_and_apr(self, event_data: dict) -> dict:
         """Create event(s) and APR in database, generate PDF, send email."""
@@ -1483,8 +1795,12 @@ Let's get started! What is the **date of the program**?"""
                 # Remembered for this conversation so payment reminders can auto-CC them later
                 self.current_coordinator_email = coordinator_email
 
-            event_type     = event_data.get('event_type', 'single')
-            circuit_events = event_data.get('circuit_events') or []
+            event_type      = event_data.get('event_type', 'single')
+            circuit_events  = event_data.get('circuit_events') or []
+            # Virasat: the inverse of a circuit — ONE institution hosting MULTIPLE
+            # artists/modules (concerts, workshops, etc.), each becomes its own event_list
+            # row, all sharing one APR — see the VIRASAT EVENTS section of the system prompt.
+            virasat_events  = event_data.get('virasat_events') or []
 
             # Accompanying artists — optional, formatted once for email/DB use
             accompanying_artists = event_data.get('accompanying_artists') or []
@@ -1509,7 +1825,9 @@ Let's get started! What is the **date of the program**?"""
                     'venue':            event_data.get('venue', event_data.get('institution_name')),
                     'city':             event_data.get('city'),
                     'state':            event_data.get('state'),
-                    'attendees':        event_data.get('attendees', 100),
+                    # Default 300 — coordinators aren't asked upfront; they can override at
+                    # the confirmation step, per the standard SPIC MACAY program size.
+                    'attendees':        event_data.get('attendees', 300),
                     'title':            event_data.get('title', f"{event_data.get('artist_name')} — SPIC MACAY"),
                     'description':      event_data.get('description', ''),
                     'status':           'Scheduled',
@@ -1520,7 +1838,7 @@ Let's get started! What is the **date of the program**?"""
                     d.update(override)
                 return d
 
-            # ── CIRCUIT: create one event_list row per stop ───────────────────
+            # ── CIRCUIT: 1 artist -> many institutions -> 1 APR -> many DB rows ─
             if event_type == 'circuit' and circuit_events:
                 if not event_data.get('artist_name'):
                     return {"success": False, "error": "artist_name required for circuit"}
@@ -1547,13 +1865,55 @@ Let's get started! What is the **date of the program**?"""
                 if not event_ids:
                     return {"success": False, "error": "No circuit events could be created"}
 
-                # APR date range
+                # ONE APR reference, linked to EVERY event in the circuit (not just the
+                # first stop) so dashboard/payment-reminder/resend-email lookups work for
+                # any stop — see create_apr_for_group().
                 dates_sorted = sorted([ce.get('date', '') for ce in circuit_events if ce.get('date')])
                 apr_base = _base({
                     'event_date': dates_sorted[0]  if dates_sorted else '',
                     'end_date':   dates_sorted[-1] if dates_sorted else '',
                 })
-                apr_data = self.event_service.create_apr(event_ids[0], apr_base)
+                apr_data = self.event_service.create_apr_for_group(event_ids, apr_base)
+                event_id = event_ids[0]
+
+            # ── VIRASAT: many artists/modules -> 1 institution -> 1 APR -> many rows ─
+            elif event_type == 'virasat' and virasat_events:
+                if not event_data.get('institution_name'):
+                    return {"success": False, "error": "institution_name required for virasat"}
+
+                event_ids = []
+                for ve in virasat_events:
+                    ve_data = _base({
+                        'event_date':       ve.get('date', event_data.get('start_date', '')),
+                        'end_date':         ve.get('date', event_data.get('start_date', '')),
+                        'event_time':       ve.get('event_time', event_data.get('event_time', '18:00')),
+                        'module_name':      ve.get('module_name', event_data.get('module_name', 'Concert')),
+                        'artist_id':        ve.get('artist_id'),
+                        'artist_name':      ve.get('artist_name', ''),
+                        'art_form':         ve.get('art_form', event_data.get('art_form', 'Music')),
+                        # Every performance in a Virasat shares the same host institution.
+                        'institution_id':   event_data.get('institution_id'),
+                        'institution_name': event_data.get('institution_name'),
+                        'venue':            event_data.get('venue', event_data.get('institution_name')),
+                        'city':             event_data.get('city'),
+                        'state':            event_data.get('state'),
+                    })
+                    res = self.event_service.create_event(ve_data)
+                    if res.get('success'):
+                        event_ids.append(res['event_id'])
+                        logger.info(f"Virasat event created: ID {res['event_id']} — {ve.get('artist_name')} / {ve.get('module_name')}")
+                    else:
+                        logger.warning(f"Virasat event failed: {res.get('error')}")
+
+                if not event_ids:
+                    return {"success": False, "error": "No virasat events could be created"}
+
+                dates_sorted = sorted([ve.get('date', '') for ve in virasat_events if ve.get('date')])
+                apr_base = _base({
+                    'event_date': dates_sorted[0]  if dates_sorted else event_data.get('start_date', ''),
+                    'end_date':   dates_sorted[-1] if dates_sorted else event_data.get('start_date', ''),
+                })
+                apr_data = self.event_service.create_apr_for_group(event_ids, apr_base)
                 event_id = event_ids[0]
 
             # ── SINGLE: existing path ─────────────────────────────────────────
@@ -1605,6 +1965,15 @@ Let's get started! What is the **date of the program**?"""
                             }
                             for ce in circuit_events
                         ] if event_type == 'circuit' else [],
+                        'virasat_events': [
+                            {
+                                'date':        ve.get('date', event_data.get('start_date', '')),
+                                'module_name': ve.get('module_name', ''),
+                                'artist_name': ve.get('artist_name', ''),
+                                'art_form':    ve.get('art_form', ''),
+                            }
+                            for ve in virasat_events
+                        ] if event_type == 'virasat' else [],
                         'coordinator_name':  coordinator_name,
                         'coordinator_email': coordinator_email,
                         'accompanying_artists': accompanying_artists,
@@ -1697,6 +2066,13 @@ Let's get started! What is the **date of the program**?"""
                 except Exception as email_err:
                     logger.error(f"Email notification error: {email_err}")
 
+            # ── Testing aid: also fire the weekly recap reports right now ──────────
+            # So the reports can be checked without waiting for the weekly schedule.
+            # Runs ALONGSIDE the normal weekly cron job in app/__init__.py, not instead
+            # of it. Toggle off later by setting SEND_WEEKLY_REPORTS_ON_APR_CREATE=false.
+            if apr_data and os.getenv('SEND_WEEKLY_REPORTS_ON_APR_CREATE', 'true').lower() == 'true':
+                self._fire_weekly_reports_async()
+
             # ── Return result ─────────────────────────────────────────────────
             apr_id = apr_data.get('request_id') if apr_data else None
             if event_type == 'circuit':
@@ -1758,4 +2134,5 @@ Let's get started! What is the **date of the program**?"""
         self.last_creation_result = None
         self.current_coordinator_email = None
         self.pending_poster = None
+        self.last_poster_result = None
         self.state = 'greeting'

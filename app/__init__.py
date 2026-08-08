@@ -6,11 +6,18 @@ Integrated with Multi-Agent System
 from flask import Flask, render_template
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
+from dotenv import load_dotenv
 import os
 import logging
 from logging.handlers import RotatingFileHandler
 import traceback
 from app.services.voice_service import VoiceService  # NEW
+
+# Load .env here too (not just in run.py) — some production entry points (e.g. a
+# Passenger/WSGI wrapper on shared hosting) import create_app() directly without ever
+# running run.py, so .env would otherwise never get read and env vars like URL_PREFIX
+# would silently be ignored. Safe to call more than once.
+load_dotenv()
 
 
 class SubPathFallbackMiddleware:
@@ -64,8 +71,13 @@ def create_app(config=None):
     # standard X-Forwarded-* headers when the proxy sends them; SubPathFallbackMiddleware
     # covers the common case where the proxy just strips the prefix and forwards the rest
     # with no special headers — set URL_PREFIX in the environment to match.
-    app.wsgi_app = SubPathFallbackMiddleware(app.wsgi_app, fallback_prefix=os.getenv('URL_PREFIX', ''))
+    _url_prefix = os.getenv('URL_PREFIX', '')
+    app.wsgi_app = SubPathFallbackMiddleware(app.wsgi_app, fallback_prefix=_url_prefix)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+    # Always visible on startup regardless of logging config — the fastest way to confirm
+    # from the server console/log file whether URL_PREFIX was actually picked up.
+    print(f"[SPIC MACAY] URL_PREFIX resolved to: {_url_prefix!r} "
+          f"({'sub-path fallback ACTIVE' if _url_prefix else 'none set — serving at domain root unless a proxy sends X-Forwarded-Prefix'})")
 
     # ========================================
     # STEP 1: Load Configuration
@@ -108,6 +120,22 @@ def create_app(config=None):
         # form link is provided; that line is simply omitted from the email if unset.
         'feedback_form_url': os.getenv('FEEDBACK_FORM_URL', ''),
     }
+
+    # Weekly report recipients — two independently configurable groups, both default to
+    # the shared team inbox for now; split them apart later by setting either env var.
+    def _recipient_list(env_var, default):
+        raw = os.getenv(env_var, default)
+        return [e.strip() for e in raw.split(',') if e.strip()]
+
+    app.config['WEEKLY_EVENTS_REPORT_RECIPIENTS'] = _recipient_list(
+        'WEEKLY_EVENTS_REPORT_EMAIL', 'smhighereducation@spicmacay.com'
+    )
+    app.config['WEEKLY_ARTIST_REPORT_RECIPIENTS'] = _recipient_list(
+        'WEEKLY_ARTIST_REPORT_EMAIL', 'smhighereducation@spicmacay.com'
+    )
+    # APScheduler cron fields — day_of_week: mon/tue/.../sun (or 'mon-fri' etc), hour: 0-23
+    app.config['WEEKLY_REPORT_DAY']  = os.getenv('WEEKLY_REPORT_DAY', 'mon')
+    app.config['WEEKLY_REPORT_HOUR'] = int(os.getenv('WEEKLY_REPORT_HOUR', 8))
 
     # OpenAI Configuration
     app.config['OPENAI_API_KEY'] = os.getenv('OPENAI_API_KEY', '')
@@ -185,7 +213,59 @@ def create_app(config=None):
         # Don't fail on notification service - it's not critical
         app.notification_service = None
         app.logger.warning("  Notification Service disabled due to initialization error")
-    
+
+    # ========================================
+    # STEP 4b: Weekly Report Scheduler
+    # ========================================
+    # Sends the two recurring recap emails (programs logged + artist directory) on a
+    # weekly cron schedule — see app/services/report_service.py for what each contains.
+    app.scheduler = None
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        import atexit
+
+        def _run_weekly_reports_job():
+            from app.services.report_service import send_weekly_reports
+            app.logger.info("Running scheduled weekly reports job...")
+            send_weekly_reports(
+                event_service,
+                notification_service,
+                app.config['WEEKLY_EVENTS_REPORT_RECIPIENTS'],
+                app.config['WEEKLY_ARTIST_REPORT_RECIPIENTS'],
+            )
+
+        # Waitress (production) runs a single process, so this always starts once. Flask's
+        # debug-mode reloader spawns a second process though — only start in the reloader's
+        # actual running child there, to avoid scheduling the job twice.
+        _should_start_scheduler = (not app.debug) or os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
+        if _should_start_scheduler and notification_service:
+            scheduler = BackgroundScheduler(daemon=True)
+            scheduler.add_job(
+                _run_weekly_reports_job,
+                trigger='cron',
+                day_of_week=app.config['WEEKLY_REPORT_DAY'],
+                hour=app.config['WEEKLY_REPORT_HOUR'],
+                minute=0,
+                id='weekly_reports',
+                replace_existing=True,
+            )
+            scheduler.start()
+            app.scheduler = scheduler
+            atexit.register(lambda: scheduler.shutdown(wait=False))
+            app.logger.info(
+                f"  Weekly report scheduler started — every "
+                f"{app.config['WEEKLY_REPORT_DAY']} at {app.config['WEEKLY_REPORT_HOUR']:02d}:00"
+            )
+        elif not notification_service:
+            app.logger.warning("  Weekly report scheduler NOT started — notification service unavailable")
+    except ImportError:
+        app.logger.warning(
+            "  APScheduler not installed — weekly reports will not run automatically. "
+            "Install with: pip install APScheduler"
+        )
+    except Exception as e:
+        app.logger.error(f"  Failed to start weekly report scheduler: {e}")
+
     # ========================================
     # STEP 5: Initialize AI Agent System
     # ========================================
@@ -330,11 +410,12 @@ def register_routes(app):
         init_event_services = None
     
     try:
-        from app.routes.dashboard import dashboard_bp
+        from app.routes.dashboard import dashboard_bp, init_services as init_dashboard_services
         app.logger.info("  Dashboard blueprint imported")
     except ImportError as e:
         app.logger.warning(f"Dashboard blueprint not found: {e}")
         dashboard_bp = None
+        init_dashboard_services = None
     
     # ========================================
     # Import New Agent Blueprints
@@ -374,10 +455,13 @@ def register_routes(app):
     
     # Dashboard blueprint
     if dashboard_bp:
+        # Must initialise the dashboard module's own EventService instance — without this
+        # its module-level event_service stays None and /api/dashboard/stats raises
+        # AttributeError, so every KPI card on the dashboard silently rendered 0.
+        if init_dashboard_services:
+            init_dashboard_services(app)
         app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
         app.logger.info("  Registered: /api/dashboard (Dashboard)")
-        
-        app.logger.info("  Registered: /api/agent (Unified Agent API)")
     
     # Events blueprint
     if voice_bp:

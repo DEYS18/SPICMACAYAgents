@@ -238,6 +238,30 @@ def download_apr_pdf(request_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@agent_bp.route('/poster/download/<path:filename>', methods=['GET'])
+def download_poster(filename):
+    """Serve a generated program poster (JPEG) for download."""
+    try:
+        from app.services.pdf_service import PDFS_DIR
+        # Strip any directory components and restrict to poster_*.jpg, generated only by
+        # poster_service.save_poster() — prevents path traversal via the filename param.
+        safe_name = os.path.basename(filename)
+        if not safe_name.startswith('poster_') or not safe_name.lower().endswith('.jpg'):
+            return jsonify({'success': False, 'error': 'Invalid poster filename'}), 400
+        poster_path = os.path.join(PDFS_DIR, safe_name)
+        if not os.path.isfile(poster_path):
+            return jsonify({'success': False, 'error': 'Poster not found'}), 404
+        return send_file(
+            poster_path,
+            mimetype='image/jpeg',
+            as_attachment=True,
+            download_name=safe_name,
+        )
+    except Exception as e:
+        logger.error(f"Error serving poster: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @agent_bp.route('/status', methods=['GET'])
 def agent_status():
     """

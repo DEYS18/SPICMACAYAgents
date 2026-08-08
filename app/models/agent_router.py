@@ -191,6 +191,12 @@ class AgentRouter:
                 result['pdf_download_url'] = creation.get('pdf_download_url')
                 self.agent.last_creation_result = None
 
+            # Surface a successful poster generation the same way — cleared once read.
+            poster = getattr(self.agent, 'last_poster_result', None)
+            if poster:
+                result['poster_download_url'] = poster.get('poster_download_url')
+                self.agent.last_poster_result = None
+
             return result
 
         except Exception as e:

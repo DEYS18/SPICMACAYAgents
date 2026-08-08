@@ -27,15 +27,40 @@ def get_stats():
     """Get dashboard statistics"""
     try:
         stats = event_service.get_dashboard_stats()
-        
+
         return jsonify({
             'success': True,
             'stats': stats
         })
-        
+
     except Exception as e:
         logger.error(f"Error fetching dashboard stats: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
         }), 500
+
+
+@dashboard_bp.route('/trigger-weekly-reports', methods=['POST'])
+def trigger_weekly_reports():
+    """
+    Manually send the weekly recap emails on demand — for testing the reports without
+    waiting for the scheduled run. Sends the same two emails the weekly cron job sends.
+    """
+    try:
+        notification_service = getattr(current_app, 'notification_service', None)
+        if not notification_service:
+            return jsonify({'success': False, 'error': 'Email service not available'}), 500
+
+        from app.services.report_service import send_weekly_reports
+        result = send_weekly_reports(
+            event_service,
+            notification_service,
+            current_app.config['WEEKLY_EVENTS_REPORT_RECIPIENTS'],
+            current_app.config['WEEKLY_ARTIST_REPORT_RECIPIENTS'],
+        )
+        return jsonify({'success': True, **result})
+
+    except Exception as e:
+        logger.error(f"Error triggering weekly reports: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500

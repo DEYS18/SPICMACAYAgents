@@ -381,14 +381,21 @@ class NotificationService:
 
         try:
             body_text = self._render_payment_reminder_body(reminder_data)
+            body_html = self._create_payment_reminder_html(reminder_data)
 
             msg = MIMEMultipart('mixed')
-            msg['Subject'] = "Request for Feedback & Program Contribution – SPIC MACAY"
+            msg['Subject'] = f"Gentle Reminder: Program Contribution Pending – SPIC MACAY ({reminder_data.get('institution_name', '')})".strip()
             msg['From'] = self.smtp_config['from_email']
             msg['To'] = ', '.join(recipients)
             if cc_recipients:
                 msg['Cc'] = ', '.join(cc_recipients)
-            msg.attach(MIMEText(body_text, 'plain'))
+
+            # Plain text alternative first, HTML preferred — mail clients render the last
+            # part in a multipart/alternative that they understand, so HTML goes last.
+            alt = MIMEMultipart('alternative')
+            alt.attach(MIMEText(body_text, 'plain'))
+            alt.attach(MIMEText(body_html, 'html'))
+            msg.attach(alt)
 
             if pdf_bytes:
                 try:
@@ -463,3 +470,397 @@ class NotificationService:
             feedback_form_line=feedback_line,
             coordinator_name=coordinator_name,
         )
+
+    def _create_payment_reminder_html(self, reminder_data: dict) -> str:
+        """Rich HTML version of the payment reminder — same yellow/red SPIC MACAY branding
+        as the APR confirmation email, with a scannable fact list of what's owed."""
+        institute_coordinator_name = (reminder_data.get('institute_coordinator_name') or '').strip()
+        salutation = f"Dear {institute_coordinator_name}," if institute_coordinator_name else "Dear Sir/Madam,"
+
+        coordinator_name = reminder_data.get('coordinator_name') or 'SPIC MACAY Team'
+        institution_name = reminder_data.get('institution_name') or 'N/A'
+        module_name      = reminder_data.get('module_name') or 'Program'
+        artist_name      = reminder_data.get('artist_name') or 'N/A'
+        request_id       = reminder_data.get('request_id') or 'N/A'
+        chapter          = reminder_data.get('chapter') or ''
+
+        event_date = reminder_data.get('event_date') or ''
+        try:
+            event_date = datetime.strptime(event_date, '%Y-%m-%d').strftime('%d %b %Y')
+        except Exception:
+            pass
+        event_date = event_date or 'N/A'
+
+        amount = reminder_data.get('amount')
+        amount_str = f"₹{amount:,.0f}" if isinstance(amount, (int, float)) else (str(amount) if amount else 'N/A')
+
+        feedback_url = (self.smtp_config.get('feedback_form_url') or '').strip()
+        feedback_row = f"""
+                <tr>
+                    <td colspan="2" style="padding-top:14px;">
+                        <a href="{feedback_url}" style="color:#B3161C; font-weight:700; text-decoration:none;">
+                            📝 Share your feedback on this program
+                        </a>
+                    </td>
+                </tr>""" if feedback_url else ""
+
+        return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #3D2B00; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{
+            background: linear-gradient(135deg, #FDEFB8 0%, #F7C948 55%, #E8A800 100%);
+            color: #8B0000; padding: 30px; text-align: center;
+            border-radius: 10px 10px 0 0; border-bottom: 4px solid #B3161C;
+        }}
+        .header h1 {{ margin: 0; font-size: 22px; }}
+        .header p {{ margin: 6px 0 0; opacity: .85; font-size: 13px; }}
+        .content {{ background: #FFFBEF; padding: 30px; border-radius: 0 0 10px 10px; }}
+        .pill {{
+            display: inline-block; background: #fff3cd; border: 2px solid #ffc107;
+            color: #7a5b00; font-weight: 700; padding: 6px 16px; border-radius: 20px;
+            font-size: 13px; margin-bottom: 18px;
+        }}
+        .facts {{
+            background: white; border-radius: 10px; border-left: 4px solid #B3161C;
+            padding: 4px 20px; margin: 20px 0; box-shadow: 0 2px 8px rgba(0,0,0,.04);
+        }}
+        .facts table {{ width: 100%; border-collapse: collapse; }}
+        .facts td {{ padding: 10px 0; border-bottom: 1px solid #F0E6C8; font-size: 14px; vertical-align: top; }}
+        .facts tr:last-child td {{ border-bottom: none; }}
+        .facts td.label {{ font-weight: 700; color: #8B0000; width: 46%; }}
+        .amount-box {{
+            background: linear-gradient(135deg, #FDEFB8 0%, #F7C948 100%);
+            border: 2px solid #E8A800; border-radius: 10px; padding: 16px 20px;
+            margin: 20px 0; text-align: center;
+        }}
+        .amount-box .label {{ font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #7a5b00; font-weight: 700; }}
+        .amount-box .value {{ font-size: 28px; font-weight: 800; color: #8B0000; margin-top: 4px; }}
+        .footer {{ text-align: center; color: #7A6050; font-size: 12px; margin-top: 26px; padding-top: 16px; border-top: 1px solid #EEE0BE; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎭 SPIC MACAY</h1>
+            <p>Society for the Promotion of Indian Classical Music And Culture Amongst Youth</p>
+        </div>
+        <div class="content">
+            <p>{salutation}</p>
+            <span class="pill">🙏 Gentle Reminder</span>
+            <p>
+                This is a gentle reminder regarding the pending contribution/payment for the program
+                execution below. Your support helps us seamlessly continue our movement of introducing
+                Indian classical music and culture to the youth.
+            </p>
+
+            <div class="facts">
+                <table>
+                    <tr><td class="label">Institute Name</td><td>{institution_name}</td></tr>
+                    <tr><td class="label">Event Date / Type</td><td>{event_date} / {module_name}</td></tr>
+                    <tr><td class="label">Artist(s) Featured</td><td>{artist_name}</td></tr>
+                    <tr><td class="label">Invoice / APR Reference No.</td><td>{request_id}</td></tr>
+                    {feedback_row}
+                </table>
+            </div>
+
+            <div class="amount-box">
+                <div class="label">Pending Amount</div>
+                <div class="value">{amount_str}</div>
+            </div>
+
+            <p>A detailed Request for Payment invoice is attached to this email as a PDF, with our
+               bank details for the transfer.</p>
+
+            <p>If the payment has already been initiated, please simply share the transaction receipt
+               with us — no further action needed on your part.</p>
+
+            <p>Thank you for your invaluable support in keeping our cultural heritage alive.</p>
+
+            <p style="margin-top: 24px;">
+                Warm regards,<br>
+                <strong>{coordinator_name}</strong><br>
+                SPIC MACAY{f' {chapter}' if chapter else ''}
+            </p>
+        </div>
+        <div class="footer">
+            <p>This is an automated email from the SPIC MACAY Supatra AI Platform.</p>
+            <p>&copy; {datetime.now().year} SPIC MACAY. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    # ── Weekly reports ───────────────────────────────────────────────────────
+
+    _REPORT_STYLE = """
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #3D2B00; }
+        .container { max-width: 680px; margin: 0 auto; padding: 20px; }
+        .header {
+            background: linear-gradient(135deg, #FDEFB8 0%, #F7C948 55%, #E8A800 100%);
+            color: #8B0000; padding: 26px 30px; text-align: center;
+            border-radius: 10px 10px 0 0; border-bottom: 4px solid #B3161C;
+        }
+        .header h1 { margin: 0; font-size: 21px; }
+        .header p { margin: 6px 0 0; opacity: .85; font-size: 13px; }
+        .content { background: #FFFBEF; padding: 28px; border-radius: 0 0 10px 10px; }
+        .stat-row { display: flex; gap: 14px; margin: 10px 0 22px; flex-wrap: wrap; }
+        .stat-tile {
+            flex: 1; min-width: 140px; background: white; border-radius: 10px;
+            border-left: 4px solid #B3161C; padding: 14px 16px; box-shadow: 0 2px 8px rgba(0,0,0,.04);
+        }
+        .stat-tile .n { font-size: 26px; font-weight: 800; color: #8B0000; }
+        .stat-tile .lbl { font-size: 12px; color: #7A6050; text-transform: uppercase; letter-spacing: .04em; }
+        table.report-table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13px; }
+        table.report-table th {
+            background: #5B1414; color: white; text-align: left; padding: 8px 10px; font-size: 12px;
+        }
+        table.report-table td { padding: 7px 10px; border-bottom: 1px solid #F0E6C8; }
+        table.report-table tr:nth-child(even) td { background: #FFF6DF; }
+        .empty-note {
+            background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px;
+            padding: 12px 16px; color: #7a5b00; font-weight: 600;
+        }
+        .attach-note { font-size: 13px; color: #7A6050; margin-top: 4px; }
+        .footer { text-align: center; color: #7A6050; font-size: 12px; margin-top: 24px; padding-top: 16px; border-top: 1px solid #EEE0BE; }
+    """
+
+    def send_weekly_events_report(self, report_data: dict, recipients: list,
+                                   excel_bytes: bytes = None) -> bool:
+        """Weekly recap: programs logged this week + academic-year-to-date totals, with
+        an Excel attachment of the week's programs."""
+        if not self.enabled:
+            logger.info("Email notifications disabled, skipping weekly events report")
+            return False
+        try:
+            html_body = self._create_weekly_events_html(report_data)
+
+            msg = MIMEMultipart('mixed')
+            week_count = report_data.get('week_count', 0)
+            msg['Subject'] = f"Weekly Programs Recap — {week_count} new this week ({report_data.get('generated_on', '')})"
+            msg['From'] = self.smtp_config['from_email']
+            msg['To'] = ', '.join(recipients)
+            msg.attach(MIMEText(html_body, 'html'))
+
+            if excel_bytes:
+                try:
+                    part = MIMEBase(
+                        'application',
+                        'vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    )
+                    part.set_payload(excel_bytes)
+                    encoders.encode_base64(part)
+                    part.add_header('Content-Disposition', 'attachment', filename='programs_this_week.xlsx')
+                    msg.attach(part)
+                except Exception as e:
+                    logger.warning(f"Failed to attach weekly programs Excel: {e}")
+
+            with smtplib.SMTP(self.smtp_config['host'], self.smtp_config['port']) as server:
+                server.starttls()
+                server.login(self.smtp_config['user'], self.smtp_config['password'])
+                server.send_message(msg)
+
+            logger.info(f"Weekly events report sent to {recipients}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send weekly events report: {e}", exc_info=True)
+            return False
+
+    def _create_weekly_events_html(self, report_data: dict) -> str:
+        week_events = report_data.get('week_events') or []
+        week_count = report_data.get('week_count', 0)
+        academic_year = report_data.get('academic_year', 'N/A')
+        ay_total = report_data.get('academic_year_total', 0)
+
+        if week_events:
+            rows = []
+            for ev in week_events[:25]:
+                start_date = ev.get('start_date') or ''
+                try:
+                    start_date = datetime.strptime(str(start_date), '%Y-%m-%d').strftime('%d %b %Y')
+                except Exception:
+                    pass
+                rows.append(
+                    f"<tr><td>{ev.get('title') or ev.get('module_name') or 'N/A'}</td>"
+                    f"<td>{ev.get('artist_name') or 'N/A'}</td>"
+                    f"<td>{ev.get('institution_name') or 'N/A'}</td>"
+                    f"<td>{start_date}</td>"
+                    f"<td>{ev.get('event_status') or ''}</td></tr>"
+                )
+            more_note = (f"<p class='attach-note'>+ {len(week_events) - 25} more in the attached "
+                         f"spreadsheet.</p>" if len(week_events) > 25 else "")
+            table_html = f"""
+            <table class="report-table">
+                <tr><th>Title</th><th>Artist</th><th>Institution</th><th>Date</th><th>Status</th></tr>
+                {''.join(rows)}
+            </table>
+            {more_note}
+            <p class="attach-note">📎 Full details attached as programs_this_week.xlsx</p>
+            """
+        else:
+            table_html = '<p class="empty-note">No new programs were logged this week.</p>'
+
+        return f"""
+<!DOCTYPE html>
+<html>
+<head><style>{self._REPORT_STYLE}</style></head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎭 SPIC MACAY — Weekly Programs Recap</h1>
+            <p>Society for the Promotion of Indian Classical Music And Culture Amongst Youth</p>
+        </div>
+        <div class="content">
+            <p>Namaste,</p>
+            <p>Here's this week's snapshot of programs logged in the system.</p>
+
+            <div class="stat-row">
+                <div class="stat-tile">
+                    <div class="n">{week_count}</div>
+                    <div class="lbl">New programs this week</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="n">{ay_total}</div>
+                    <div class="lbl">Total programs — AY {academic_year}</div>
+                </div>
+            </div>
+
+            <h3 style="color:#8B0000;">Programs Logged This Week</h3>
+            {table_html}
+
+            <p style="margin-top: 24px;">
+                Warm regards,<br>
+                <strong>SPIC MACAY Supatra AI Platform</strong>
+            </p>
+        </div>
+        <div class="footer">
+            <p>This is an automated weekly email from the SPIC MACAY Supatra AI Platform.</p>
+            <p>&copy; {datetime.now().year} SPIC MACAY. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    def send_weekly_artist_report(self, report_data: dict, recipients: list,
+                                   week_excel_bytes: bytes = None,
+                                   full_excel_bytes: bytes = None) -> bool:
+        """Weekly recap: artists added this week, with two Excel attachments — the
+        week's new artists, and the complete artist directory."""
+        if not self.enabled:
+            logger.info("Email notifications disabled, skipping weekly artist report")
+            return False
+        try:
+            html_body = self._create_weekly_artists_html(report_data)
+
+            msg = MIMEMultipart('mixed')
+            week_count = report_data.get('week_count', 0)
+            msg['Subject'] = f"Weekly Artist Directory Recap — {week_count} new this week ({report_data.get('generated_on', '')})"
+            msg['From'] = self.smtp_config['from_email']
+            msg['To'] = ', '.join(recipients)
+            msg.attach(MIMEText(html_body, 'html'))
+
+            for excel_bytes, filename in [
+                (week_excel_bytes, 'artists_added_this_week.xlsx'),
+                (full_excel_bytes, 'full_artist_directory.xlsx'),
+            ]:
+                if not excel_bytes:
+                    continue
+                try:
+                    part = MIMEBase(
+                        'application',
+                        'vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    )
+                    part.set_payload(excel_bytes)
+                    encoders.encode_base64(part)
+                    part.add_header('Content-Disposition', 'attachment', filename=filename)
+                    msg.attach(part)
+                except Exception as e:
+                    logger.warning(f"Failed to attach {filename}: {e}")
+
+            with smtplib.SMTP(self.smtp_config['host'], self.smtp_config['port']) as server:
+                server.starttls()
+                server.login(self.smtp_config['user'], self.smtp_config['password'])
+                server.send_message(msg)
+
+            logger.info(f"Weekly artist report sent to {recipients}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send weekly artist report: {e}", exc_info=True)
+            return False
+
+    def _create_weekly_artists_html(self, report_data: dict) -> str:
+        week_artists = report_data.get('week_artists') or []
+        week_count = report_data.get('week_count', 0)
+        total_artists = report_data.get('total_artists', 0)
+
+        if week_artists:
+            rows = []
+            for a in week_artists[:25]:
+                rows.append(
+                    f"<tr><td>{a.get('name') or 'N/A'}</td>"
+                    f"<td>{a.get('art_form') or ''}</td>"
+                    f"<td>{a.get('city') or ''}{', ' + a['state'] if a.get('state') else ''}</td>"
+                    f"<td>{a.get('email') or ''}</td></tr>"
+                )
+            more_note = (f"<p class='attach-note'>+ {len(week_artists) - 25} more in the attached "
+                         f"spreadsheet.</p>" if len(week_artists) > 25 else "")
+            table_html = f"""
+            <table class="report-table">
+                <tr><th>Name</th><th>Art Form</th><th>Location</th><th>Email</th></tr>
+                {''.join(rows)}
+            </table>
+            {more_note}
+            """
+        else:
+            table_html = '<p class="empty-note">No new artists were added to the directory this week.</p>'
+
+        return f"""
+<!DOCTYPE html>
+<html>
+<head><style>{self._REPORT_STYLE}</style></head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎭 SPIC MACAY — Weekly Artist Directory Recap</h1>
+            <p>Society for the Promotion of Indian Classical Music And Culture Amongst Youth</p>
+        </div>
+        <div class="content">
+            <p>Namaste,</p>
+            <p>Here's this week's snapshot of the artist directory.</p>
+
+            <div class="stat-row">
+                <div class="stat-tile">
+                    <div class="n">{week_count}</div>
+                    <div class="lbl">New artists this week</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="n">{total_artists}</div>
+                    <div class="lbl">Total artists in directory</div>
+                </div>
+            </div>
+
+            <h3 style="color:#8B0000;">Artists Added This Week</h3>
+            {table_html}
+
+            <p class="attach-note">📎 Two spreadsheets attached: this week's new artists
+               (artists_added_this_week.xlsx), and the complete directory
+               (full_artist_directory.xlsx).</p>
+
+            <p style="margin-top: 24px;">
+                Warm regards,<br>
+                <strong>SPIC MACAY Supatra AI Platform</strong>
+            </p>
+        </div>
+        <div class="footer">
+            <p>This is an automated weekly email from the SPIC MACAY Supatra AI Platform.</p>
+            <p>&copy; {datetime.now().year} SPIC MACAY. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
+"""

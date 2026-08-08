@@ -23,7 +23,9 @@ def generate_apr_pdf(apr_data: dict, event_data: dict, coordinator_data: dict = 
 
     Args:
         apr_data:         {'request_id': ..., 'custom_apr': ..., 'status': ...}
-        event_data:       event details; for circuits includes 'circuit_events' list
+        event_data:       event details; for circuits includes 'circuit_events' list, for
+                           virasats includes 'virasat_events' list (each with its own
+                           artist_name/art_form/module_name — one institution, many artists)
         coordinator_data: optional {'coordinator_name': ..., 'coordinator_email': ...}
 
     Returns:
@@ -59,7 +61,11 @@ def generate_apr_pdf(apr_data: dict, event_data: dict, coordinator_data: dict = 
 
         # Build events list
         circuit_events = event_data.get('circuit_events') or []
-        if circuit_events:
+        virasat_events = event_data.get('virasat_events') or []
+        is_virasat = event_type == 'virasat' and bool(virasat_events)
+        if is_virasat:
+            events_list = virasat_events
+        elif circuit_events:
             events_list = circuit_events
         else:
             events_list = [{
@@ -126,24 +132,57 @@ def generate_apr_pdf(apr_data: dict, event_data: dict, coordinator_data: dict = 
         pdf.ln(5)
 
         # ── Section 2: Events ────────────────────────────────────────────────
-        cat_label = 'Circuit' if event_type == 'circuit' else 'Single Event'
+        if is_virasat:
+            cat_label = 'Virasat Series'
+        elif event_type == 'circuit':
+            cat_label = 'Circuit'
+        else:
+            cat_label = 'Single Event'
         _section_heading(pdf, PAGE_W, f'Section 2: Event Details  (Category: {cat_label})', RED)
-        # Cols: Sl(10) + Date(28) + Module(42) + Institution(65) + City(35) = 180
-        ew = [10, 28, 42, 65, 35]
-        _table_header(pdf, ew, ['Sl.', 'Date', 'Module / Category', 'Institution', 'City'])
-        for idx, ev in enumerate(events_list, 1):
-            ev_date = ev.get('date') or ev.get('start_date', '')
-            try:
-                ev_date = datetime.strptime(ev_date, '%Y-%m-%d').strftime('%d %b %Y')
-            except Exception:
-                pass
-            _table_row(pdf, ew, [
-                str(idx),
-                ev_date,
-                ev.get('module_name') or module_name,
-                ev.get('institution_name', 'N/A'),
-                ev.get('city', ''),
-            ])
+
+        if is_virasat:
+            # One host institution for the whole series — shown once, not per row.
+            pdf.set_font('Helvetica', 'B', 9)
+            venue_line = event_data.get('institution_name', 'N/A')
+            loc = ', '.join(filter(None, [event_data.get('city', ''), event_data.get('state', '')]))
+            if loc:
+                venue_line += f'  ({loc})'
+            pdf.cell(PAGE_W, 6, f'Host Institution: {venue_line}', new_x='LMARGIN', new_y='NEXT')
+            pdf.ln(1)
+
+            # Cols: Sl(8) + Date(24) + Module(38) + Artist(75) + Art Form(35) = 180
+            ew = [8, 24, 38, 75, 35]
+            _table_header(pdf, ew, ['Sl.', 'Date', 'Module', 'Artist', 'Art Form'])
+            for idx, ev in enumerate(events_list, 1):
+                ev_date = ev.get('date') or ev.get('start_date', '')
+                try:
+                    ev_date = datetime.strptime(ev_date, '%Y-%m-%d').strftime('%d %b %Y')
+                except Exception:
+                    pass
+                _table_row(pdf, ew, [
+                    str(idx),
+                    ev_date,
+                    ev.get('module_name') or module_name,
+                    ev.get('artist_name', 'N/A'),
+                    ev.get('art_form', ''),
+                ])
+        else:
+            # Cols: Sl(10) + Date(28) + Module(42) + Institution(65) + City(35) = 180
+            ew = [10, 28, 42, 65, 35]
+            _table_header(pdf, ew, ['Sl.', 'Date', 'Module / Category', 'Institution', 'City'])
+            for idx, ev in enumerate(events_list, 1):
+                ev_date = ev.get('date') or ev.get('start_date', '')
+                try:
+                    ev_date = datetime.strptime(ev_date, '%Y-%m-%d').strftime('%d %b %Y')
+                except Exception:
+                    pass
+                _table_row(pdf, ew, [
+                    str(idx),
+                    ev_date,
+                    ev.get('module_name') or module_name,
+                    ev.get('institution_name', 'N/A'),
+                    ev.get('city', ''),
+                ])
         pdf.ln(5)
 
         # ── Section 3: Artist ────────────────────────────────────────────────
@@ -151,9 +190,20 @@ def generate_apr_pdf(apr_data: dict, event_data: dict, coordinator_data: dict = 
         # Cols: Role(35) + Name(85) + Art Form(60) = 180
         aw = [35, 85, 60]
         _table_header(pdf, aw, ['Role', 'Artist Name', 'Art Form'])
-        _table_row(pdf, aw, ['Main Artist', artist_name, art_form])
-        for acc in (event_data.get('accompanying_artists') or []):
-            _table_row(pdf, aw, ['Accompanying', acc.get('name', ''), acc.get('art_form', '')])
+        if is_virasat:
+            # Each performance has its own artist — list every distinct performer instead
+            # of one "Main Artist" (there is no single main artist in a Virasat).
+            seen = set()
+            for ev in events_list:
+                name = ev.get('artist_name', '')
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                _table_row(pdf, aw, ['Performer', name, ev.get('art_form', '')])
+        else:
+            _table_row(pdf, aw, ['Main Artist', artist_name, art_form])
+            for acc in (event_data.get('accompanying_artists') or []):
+                _table_row(pdf, aw, ['Accompanying', acc.get('name', ''), acc.get('art_form', '')])
         pdf.ln(8)
 
         # ── Footer ───────────────────────────────────────────────────────────

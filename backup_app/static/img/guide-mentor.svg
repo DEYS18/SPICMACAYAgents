@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original generic "mentor / guide" illustration created by Claude. Not a depiction of any real person. -->
+<svg width="220" height="220" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Friendly elderly guide illustration">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#A11220"/>
+      <stop offset="100%" stop-color="#660000"/>
+    </linearGradient>
+    <linearGradient id="kurta" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F5E6C8"/>
+      <stop offset="100%" stop-color="#E9CF9B"/>
+    </linearGradient>
+    <linearGradient id="shawl" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#E8843C"/>
+      <stop offset="100%" stop-color="#D2691E"/>
+    </linearGradient>
+    <clipPath id="circle"><circle cx="110" cy="110" r="106"/></clipPath>
+  </defs>
+
+  <!-- backdrop -->
+  <circle cx="110" cy="110" r="106" fill="url(#bg)"/>
+  <circle cx="110" cy="110" r="106" fill="none" stroke="#F5E6C8" stroke-width="4" opacity="0.55"/>
+
+  <g clip-path="url(#circle)">
+    <!-- shoulders / shawl -->
+    <path d="M30 220 Q30 168 70 152 L150 152 Q190 168 190 220 Z" fill="url(#kurta)"/>
+    <path d="M70 152 Q60 200 64 220 L88 220 Q80 180 96 156 Z" fill="url(#shawl)" opacity="0.9"/>
+    <path d="M150 152 Q160 200 156 220 L132 220 Q140 180 124 156 Z" fill="url(#shawl)" opacity="0.9"/>
+
+    <!-- neck -->
+    <rect x="96" y="128" width="28" height="34" rx="12" fill="#D9A066"/>
+
+    <!-- face -->
+    <ellipse cx="110" cy="98" rx="46" ry="50" fill="#E3B074"/>
+
+    <!-- ears -->
+    <ellipse cx="64" cy="100" rx="8" ry="12" fill="#D9A066"/>
+    <ellipse cx="156" cy="100" rx="8" ry="12" fill="#D9A066"/>
+
+    <!-- bald crown with side white hair -->
+    <path d="M64 92 Q60 50 110 48 Q160 50 156 92 Q150 70 110 68 Q70 70 64 92 Z" fill="#E3B074"/>
+    <path d="M58 96 Q54 64 72 56 Q66 84 70 110 Q60 108 58 96 Z" fill="#F2F2F0"/>
+    <path d="M162 96 Q166 64 148 56 Q154 84 150 110 Q160 108 162 96 Z" fill="#F2F2F0"/>
+
+    <!-- eyebrows -->
+    <path d="M82 86 Q92 80 102 85" stroke="#CFCFCF" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M118 85 Q128 80 138 86" stroke="#CFCFCF" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+    <!-- glasses -->
+    <circle cx="92" cy="98" r="13" fill="#ffffff" opacity="0.25"/>
+    <circle cx="128" cy="98" r="13" fill="#ffffff" opacity="0.25"/>
+    <circle cx="92" cy="98" r="13" fill="none" stroke="#5b3a1a" stroke-width="2.5"/>
+    <circle cx="128" cy="98" r="13" fill="none" stroke="#5b3a1a" stroke-width="2.5"/>
+    <line x1="105" y1="98" x2="115" y2="98" stroke="#5b3a1a" stroke-width="2.5"/>
+
+    <!-- eyes -->
+    <circle cx="92" cy="98" r="3.2" fill="#3a2a1a"/>
+    <circle cx="128" cy="98" r="3.2" fill="#3a2a1a"/>
+
+    <!-- nose -->
+    <path d="M110 102 Q107 112 112 116" stroke="#C88B53" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+    <!-- warm smile -->
+    <path d="M96 124 Q110 134 124 124" stroke="#8a4b2a" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+    <!-- white beard -->
+    <path d="M74 112 Q78 150 110 156 Q142 150 146 112 Q140 132 110 134 Q80 132 74 112 Z" fill="#F2F2F0"/>
+    <path d="M96 128 Q110 142 124 128 Q118 150 110 152 Q102 150 96 128 Z" fill="#E6E6E4"/>
+  </g>
+</svg>

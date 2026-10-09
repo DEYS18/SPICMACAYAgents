@@ -140,10 +140,63 @@ def send_weekly_artist_report(event_service, notification_service, recipients: l
         return False
 
 
+def send_payment_confirmations(event_service, notification_service, since_days: int = 30) -> dict:
+    """
+    Announce artist payments the finance team completed recently — one note to the artist,
+    one to the coordinator who filed the APR.
+
+    A payment stays inside the `since_days` window across several weekly runs, so each
+    recipient is recorded in the notification ledger and skipped thereafter.
+    """
+    summary = {'artist_emails_sent': 0, 'coordinator_emails_sent': 0, 'payments_processed': 0}
+    try:
+        payments = event_service.get_completed_payments(since_days=since_days)
+        if not payments:
+            logger.info("No new completed payments to announce")
+            return summary
+
+        for pay in payments:
+            artist_sent = False
+
+            if pay.get('notify_artist'):
+                artist_email = pay['artist_email'].strip()
+                if notification_service.send_payment_completed_artist(pay, [artist_email]):
+                    artist_sent = True
+                    summary['artist_emails_sent'] += 1
+                    event_service.record_payment_notification(
+                        pay['payment_id'], 'artist', artist_email,
+                        pay.get('event_id'), pay.get('artist_id'),
+                    )
+
+            if pay.get('notify_coordinator'):
+                coordinator_email = pay['coordinator_email'].strip()
+                # Distinguishes "artist already knows" from "please pass this on"
+                payload = dict(pay, artist_notified=artist_sent or bool(pay.get('artist_email')))
+                if notification_service.send_payment_completed_coordinator(payload, [coordinator_email]):
+                    summary['coordinator_emails_sent'] += 1
+                    event_service.record_payment_notification(
+                        pay['payment_id'], 'coordinator', coordinator_email,
+                        pay.get('event_id'), pay.get('artist_id'),
+                    )
+
+            summary['payments_processed'] += 1
+
+        logger.info(f"Payment confirmations run complete — {summary}")
+        return summary
+    except Exception as e:
+        logger.error(f"Failed to send payment confirmations: {e}", exc_info=True)
+        return summary
+
+
 def send_weekly_reports(event_service, notification_service, events_recipients: list,
-                         artist_recipients: list) -> dict:
+                         artist_recipients: list, payment_window_days: int = 30) -> dict:
     """Send both weekly reports. Used by the scheduled job and the manual trigger route."""
     events_sent = send_weekly_events_report(event_service, notification_service, events_recipients)
     artist_sent = send_weekly_artist_report(event_service, notification_service, artist_recipients)
+    payments = send_payment_confirmations(event_service, notification_service, payment_window_days)
     logger.info(f"Weekly reports run complete — events_sent={events_sent}, artist_sent={artist_sent}")
-    return {'events_report_sent': events_sent, 'artist_report_sent': artist_sent}
+    return {
+        'events_report_sent': events_sent,
+        'artist_report_sent': artist_sent,
+        'payment_confirmations': payments,
+    }

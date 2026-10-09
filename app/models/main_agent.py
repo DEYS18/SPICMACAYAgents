@@ -195,6 +195,15 @@ class ConversationalAgent:
                 'response': "I had trouble reading the poster. Please try a clearer image or type the event details directly.",
             }
 
+    def is_artist_photo_upload(self, user_message: str) -> bool:
+        """Whether an upload's note marks it as an artist portrait rather than program
+        photos. Lets the chat route send it for vision handling instead of stashing it."""
+        try:
+            return self.agent.is_artist_photo_upload(user_message)
+        except Exception as e:
+            logger.error(f"Error checking artist photo intent: {e}")
+            return False
+
     def attach_pending_photos(self, photos: list):
         """Passthrough to the SPIC MACAY agent — stash optional event/program photos
         (base64) sent by the client so they're saved + emailed once the program is created."""

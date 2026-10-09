@@ -5,6 +5,8 @@ Chat routes - Updated to use unified agent system
 from flask import Blueprint, request, jsonify, current_app
 import logging
 
+from app.services.session_manager import session_agent
+
 logger = logging.getLogger(__name__)
 
 chat_bp = Blueprint('chat', __name__)
@@ -14,8 +16,8 @@ chat_bp = Blueprint('chat', __name__)
 def start_chat():
     """Start a new conversation"""
     try:
-        agent = current_app.agent
-        response = agent.start_conversation()
+        with session_agent() as agent:
+            response = agent.start_conversation()
         return jsonify(response)
         
     except Exception as e:
@@ -39,9 +41,9 @@ def send_message():
                 'error': 'Message is required'
             }), 400
         
-        agent = current_app.agent
-        response = agent.process_message(user_message)
-        
+        with session_agent() as agent:
+            response = agent.process_message(user_message)
+
         return jsonify(response)
         
     except Exception as e:
@@ -57,8 +59,8 @@ def send_message():
 def reset_chat():
     """Reset conversation"""
     try:
-        agent = current_app.agent
-        agent.reset_conversation()
+        with session_agent() as agent:
+            agent.reset_conversation()
         
         return jsonify({
             'success': True,
@@ -77,8 +79,8 @@ def reset_chat():
 def get_history():
     """Get conversation history"""
     try:
-        agent = current_app.agent
-        history = agent.get_conversation_history()
+        with session_agent() as agent:
+            history = agent.get_conversation_history()
         
         return jsonify({
             'success': True,

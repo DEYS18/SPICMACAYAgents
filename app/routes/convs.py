@@ -8,6 +8,8 @@ import logging
 import traceback
 import os
 
+from app.services.session_manager import session_agent, registry_stats
+
 logger = logging.getLogger(__name__)
 
 # Create blueprint for unified agent API
@@ -18,8 +20,9 @@ agent_bp = Blueprint('agent', __name__)
 def health_check():
     """Check agent system health"""
     try:
-        agent = current_app.agent
-        
+        with session_agent() as agent:
+            conversation_context = dict(getattr(agent, 'conversation_context', {}) or {})
+
         return jsonify({
             'status': 'healthy',
             'agents': {
@@ -28,7 +31,7 @@ def health_check():
                 'workflow_agent': 'ready',
                 'router': 'active'
             },
-            'context': getattr(agent, 'conversation_context', {})
+            'context': conversation_context
         })
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -45,62 +48,81 @@ def chat():
     Accepts JSON (text only) or multipart/form-data (image + optional text).
     """
     try:
-        if not hasattr(current_app, 'agent'):
+        if not hasattr(current_app, 'conversation_registry'):
             return jsonify({'success': False, 'error': 'Agent system not initialized'}), 500
 
-        agent = current_app.agent
+        # This tab's own agent — held under its lock for the whole request so a second
+        # message can't interleave with this one's state changes
+        with session_agent() as agent:
+            # ── Poster image upload (multipart/form-data) ────────────────────
+            content_type = request.content_type or ''
+            if 'multipart/form-data' in content_type:
+                import base64
+                user_message = (request.form.get('message') or '').strip()
+                image_file = request.files.get('image')
+                if not image_file:
+                    return jsonify({'success': False, 'error': 'No image file in upload'}), 400
 
-        # ── Poster image upload (multipart/form-data) ────────────────────────
-        content_type = request.content_type or ''
-        if 'multipart/form-data' in content_type:
-            import base64
-            user_message = (request.form.get('message') or '').strip()
-            image_file = request.files.get('image')
-            if not image_file:
-                return jsonify({'success': False, 'error': 'No image file in upload'}), 400
+                img_bytes = image_file.read()
+                if len(img_bytes) > 10 * 1024 * 1024:
+                    return jsonify({'success': False, 'error': 'Image too large — max 10 MB'}), 413
 
-            img_bytes = image_file.read()
-            if len(img_bytes) > 10 * 1024 * 1024:
-                return jsonify({'success': False, 'error': 'Image too large — max 10 MB'}), 413
+                image_b64 = base64.b64encode(img_bytes).decode('utf-8')
+                mime_type  = image_file.content_type or 'image/jpeg'
+                logger.info(f"Poster upload: {mime_type}, {len(img_bytes)//1024} KB")
 
-            image_b64 = base64.b64encode(img_bytes).decode('utf-8')
-            mime_type  = image_file.content_type or 'image/jpeg'
-            logger.info(f"Poster upload: {mime_type}, {len(img_bytes)//1024} KB")
+                response = agent.process_message_with_image(user_message, image_b64, mime_type)
+                logger.info(f"Poster response from {response.get('agent_type', 'unknown')} agent")
+                return jsonify(response)
 
-            response = agent.process_message_with_image(user_message, image_b64, mime_type)
-            logger.info(f"Poster response from {response.get('agent_type', 'unknown')} agent")
+            # ── Normal JSON path ─────────────────────────────────────────────
+            data = request.get_json()
+
+            if not data:
+                logger.error("No JSON data received")
+                return jsonify({
+                    'success': False,
+                    'error': 'No data provided'
+                }), 400
+
+            user_message = data.get('message', '')
+            event_photos = data.get('event_photos')
+
+            if not user_message and not event_photos:
+                logger.error("Empty message received")
+                return jsonify({
+                    'success': False,
+                    'error': 'Message is required'
+                }), 400
+
+            # An artist portrait can arrive on either attach button. The photos button posts
+            # base64 here rather than multipart, so without this it would be filed as a program
+            # photo and never reach the handler that stores it against the artist.
+            if event_photos and agent.is_artist_photo_upload(user_message):
+                photo = event_photos[0]
+                logger.info("Artist photo note detected on a photos-button upload — "
+                            "routing to image handler")
+                response = agent.process_message_with_image(
+                    user_message,
+                    photo.get('data', ''),
+                    photo.get('mime_type', 'image/jpeg'),
+                )
+                # Tells the client to clear its attachment strip; these bytes were consumed
+                # as the artist's portrait and must not also ride along on the APR email.
+                response['photos_consumed'] = True
+                return jsonify(response)
+
+            # Optional program/event photos (base64) — stashed until the program is created
+            if event_photos:
+                logger.info(f"Attaching {len(event_photos)} event photo(s) to conversation")
+                agent.attach_pending_photos(event_photos)
+
+            logger.info(f"Processing message: {user_message[:60]}...")
+            response = agent.process_message(user_message)
+            logger.info(f"Response generated by {response.get('agent_type', 'unknown')} agent")
             return jsonify(response)
 
-        # ── Normal JSON path ─────────────────────────────────────────────────
-        data = request.get_json()
 
-        if not data:
-            logger.error("No JSON data received")
-            return jsonify({
-                'success': False,
-                'error': 'No data provided'
-            }), 400
-
-        user_message = data.get('message', '')
-        event_photos = data.get('event_photos')
-
-        if not user_message and not event_photos:
-            logger.error("Empty message received")
-            return jsonify({
-                'success': False,
-                'error': 'Message is required'
-            }), 400
-
-        # Optional program/event photos (base64) — stashed until the program is created
-        if event_photos:
-            logger.info(f"Attaching {len(event_photos)} event photo(s) to conversation")
-            agent.attach_pending_photos(event_photos)
-
-        logger.info(f"Processing message: {user_message[:60]}...")
-        response = agent.process_message(user_message)
-        logger.info(f"Response generated by {response.get('agent_type', 'unknown')} agent")
-        return jsonify(response)
-        
     except KeyError as e:
         logger.error(f"KeyError in chat endpoint: {e}")
         logger.error(f"Full traceback: {traceback.format_exc()}")
@@ -135,15 +157,13 @@ def start_conversation():
                 'error': 'Agent system not initialized'
             }), 500
         
-        agent = current_app.agent
-        
         logger.info("Starting new conversation...")
-        
-        # Start new conversation
-        response = agent.start_conversation()
-        
+
+        with session_agent() as agent:
+            response = agent.start_conversation()
+
         logger.info("New conversation started successfully")
-        
+
         return jsonify(response)
         
     except Exception as e:
@@ -169,9 +189,9 @@ def reset_conversation():
                 'error': 'Agent system not initialized'
             }), 500
         
-        agent = current_app.agent
-        agent.reset_conversation()
-        
+        with session_agent() as agent:
+            agent.reset_conversation()
+
         logger.info("Conversation reset successfully")
         
         return jsonify({
@@ -201,9 +221,9 @@ def get_history():
                 'error': 'Agent system not initialized'
             }), 500
         
-        agent = current_app.agent
-        history = agent.get_conversation_history()
-        
+        with session_agent() as agent:
+            history = agent.get_conversation_history()
+
         return jsonify({
             'success': True,
             'history': history
@@ -275,13 +295,15 @@ def agent_status():
                 'error': 'Agent system not initialized'
             }), 500
         
-        agent = current_app.agent
-        
+        with session_agent() as agent:
+            context = dict(getattr(agent, 'conversation_context', {}) or {})
+
         status = {
             'success': True,
             'system': {
                 'main_agent': 'ConversationalAgent',
-                'status': 'active'
+                'status': 'active',
+                'sessions': registry_stats(),
             },
             'sub_agents': {
                 'spic_macay_agent': {
@@ -300,8 +322,8 @@ def agent_status():
                     'status': 'active'
                 }
             },
-            'context': getattr(agent, 'conversation_context', {}),
-            'current_agent': agent.conversation_context.get('agent_type', 'none')
+            'context': context,
+            'current_agent': context.get('agent_type', 'none')
         }
         
         return jsonify(status)

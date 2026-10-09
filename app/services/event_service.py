@@ -4,7 +4,7 @@ Event Management Service
 """
 
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import date, datetime
 import uuid
 import logging
 
@@ -18,6 +18,116 @@ class EventService:
         self.db = db_manager
         logger.info("EventService initialized with database connection")
     
+    def _added_by_value(self, event_data: dict) -> str:
+        """
+        Value for event_list.added_by / apr_payment_request.created_by.
+
+        The admin app treats these as numeric users_field_data.uid values and joins on them
+        to show who filed a record, so a name written here renders as blank over there.
+        Falls back to the name only when the coordinator has no portal account.
+        """
+        uid = event_data.get('created_by_uid')
+        if uid:
+            return str(uid)
+
+        email = (event_data.get('creator_email') or event_data.get('coordinator_email') or '').strip()
+        name = (event_data.get('created_by') or '').strip()
+        try:
+            if email:
+                row = self.db.fetch_one(
+                    "SELECT uid FROM users_field_data WHERE mail = %s AND status = 1 LIMIT 1",
+                    (email,),
+                )
+                if row:
+                    return str(row['uid'])
+            if name:
+                row = self.db.fetch_one(
+                    "SELECT uid FROM users_field_data WHERE name = %s AND status = 1 LIMIT 1",
+                    (name,),
+                )
+                if row:
+                    return str(row['uid'])
+        except Exception as e:
+            logger.error(f"Error resolving added_by uid: {e}")
+
+        return name or 'System'
+
+    def resolve_accompanying_artist_ids(self, accompanying_artists: List[Dict]) -> str:
+        """
+        Render accompanying artists as the comma-separated artists_list.tid string the
+        admin app expects, mirroring the main `artist` column so its
+        FIND_IN_SET(a.tid, e.accompanying_artist) lookups resolve them.
+
+        An artist the assistant could not match to a directory record is skipped rather
+        than written as free text, which would silently corrupt those lookups.
+        """
+        ids: List[str] = []
+        for a in accompanying_artists or []:
+            artist_id = str(a.get('artist_id') or '').strip()
+
+            if not artist_id:
+                name = (a.get('name') or '').strip()
+                if not name:
+                    continue
+                try:
+                    row = self.db.fetch_one(
+                        "SELECT tid FROM artists_list WHERE name = %s AND status = 1 LIMIT 1",
+                        (name,),
+                    )
+                    if row:
+                        artist_id = str(row['tid'])
+                    else:
+                        logger.warning(
+                            f"Accompanying artist '{name}' has no directory record — "
+                            f"omitted from accompanying_artist IDs"
+                        )
+                        continue
+                except Exception as e:
+                    logger.error(f"Error resolving accompanying artist '{name}': {e}")
+                    continue
+
+            if artist_id.isdigit() and artist_id not in ids:
+                ids.append(artist_id)
+
+        return ','.join(ids)[:255]
+
+    def get_accompanying_artists(self, accompanying_artist: str) -> List[Dict]:
+        """
+        Expand a stored accompanying_artist value into {name, art_form} records for
+        emails and PDFs. Accepts the current comma-separated IDs and the older
+        "Name (art form), ..." text that pre-existing rows still hold.
+        """
+        raw = (accompanying_artist or '').strip()
+        if not raw:
+            return []
+
+        parts = [p.strip() for p in raw.split(',') if p.strip()]
+        if all(p.isdigit() for p in parts):
+            placeholders = ','.join(['%s'] * len(parts))
+            try:
+                rows = self.db.fetch_all(
+                    f"SELECT tid, name, art_form FROM artists_list WHERE tid IN ({placeholders})",
+                    tuple(parts),
+                ) or []
+                by_id = {str(r['tid']): r for r in rows}
+                return [
+                    {
+                        'artist_id': pid,
+                        'name': by_id[pid].get('name', ''),
+                        'art_form': by_id[pid].get('art_form', '') or '',
+                    }
+                    for pid in parts if pid in by_id
+                ]
+            except Exception as e:
+                logger.error(f"Error expanding accompanying artist IDs: {e}")
+                return []
+
+        import re
+        return [
+            {'artist_id': '', 'name': name.strip(), 'art_form': art.strip()}
+            for name, art in re.findall(r'([^,()]+)\(([^)]*)\)', raw)
+        ]
+
     def create_event(self, event_data: dict) -> dict:
         """
         Create a new event
@@ -67,12 +177,9 @@ class EventService:
             current_date = datetime.now().strftime('%Y-%m-%d')
             event_title = event_data.get('title', f"Event at {event_data.get('institution_name', 'Institution')}")
 
-            # Format accompanying_artists (list of {name, art_form}) into a display string
-            accompanying_artists = event_data.get('accompanying_artists') or []
-            accompanying_artist_str = ', '.join(
-                f"{a.get('name', '').strip()} ({a.get('art_form', '').strip()})".strip()
-                for a in accompanying_artists if a.get('name')
-            )[:255]  # column is varchar(255)
+            accompanying_artist_str = self.resolve_accompanying_artist_ids(
+                event_data.get('accompanying_artists') or []
+            )
 
             values = (
                 next_id,
@@ -89,10 +196,10 @@ class EventService:
                 event_data.get('venue', event_data.get('institution_name', '')),
                 event_data.get('attendees', 100),
                 event_data.get('budget', 0),
-                event_data.get('created_by', 'System'),
+                self._added_by_value(event_data),
                 current_date,
                 current_date,
-                'Pending',
+                event_data.get('event_status', 'Pending'),
                 1,
                 fy
             )
@@ -173,13 +280,13 @@ class EventService:
                 event_data.get('chapter', ''),
                 event_data.get('attendees', 100),
                 '',  # fc field
-                event_data.get('created_by', 'System'),
+                self._added_by_value(event_data),
                 current_date,
-                event_data.get('created_by', 'System')
+                self._added_by_value(event_data)
             )
-            
+
             result = self.db.execute_query(query, values, commit=True)
-            
+
             if not result or not result.get('success'):
                 logger.error(f"Failed to create APR: {result.get('error') if result else 'Unknown error'}")
                 return None
@@ -253,9 +360,9 @@ class EventService:
                     event_data.get('chapter', ''),
                     event_data.get('attendees', 300),
                     '',  # fc field
-                    event_data.get('created_by', 'System'),
+                    self._added_by_value(event_data),
                     current_date,
-                    event_data.get('created_by', 'System'),
+                    self._added_by_value(event_data),
                 )
                 result = self.db.execute_query(query, values, commit=True)
                 if not result or not result.get('success'):
@@ -781,6 +888,129 @@ class EventService:
             logger.error(f"Error sending payment reminder for event {event_id}: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    # Institution guidelines shipped with the app; attached to the pre-event email when present
+    _GUIDELINES_PDF = 'event_institution_guidelines.pdf'
+
+    def _load_guidelines_pdf(self) -> Optional[bytes]:
+        import os
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'static', 'guidelines', self._GUIDELINES_PDF,
+        )
+        try:
+            with open(path, 'rb') as fh:
+                return fh.read()
+        except FileNotFoundError:
+            logger.warning(f"Guidelines PDF not found at {path} — sending body-only guidelines")
+            return None
+        except Exception as e:
+            logger.error(f"Could not read guidelines PDF: {e}")
+            return None
+
+    def get_event_for_guidelines(self, event_id: int) -> Optional[Dict]:
+        """Fetch one program with the detail the pre-event guidelines email needs."""
+        try:
+            query = """
+                SELECT
+                    e.id, e.title, e.start_date, e.event_time, e.venue, e.city, e.state,
+                    e.event_category AS module_name, e.accompanying_artist,
+                    a.name AS artist_name, a.art_form,
+                    i.institution_name, i.email AS institution_email,
+                    i.name_of_the_coordinator AS institution_coordinator,
+                    apr.chapter
+                FROM event_list e
+                LEFT JOIN artists_list a ON e.artist = a.tid
+                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN apr_payment_request apr ON apr.event_id = e.id
+                WHERE e.id = %s AND e.status = 1
+            """
+            return self.db.fetch_one(query, (event_id,))
+        except Exception as e:
+            logger.error(f"Error fetching event {event_id} for guidelines: {e}")
+            return None
+
+    def send_pre_event_guidelines(self, event_id: int, notification_service,
+                                  institute_email: str = None,
+                                  coordinator_name: str = None,
+                                  coordinator_email: str = None) -> dict:
+        """
+        Send the host institution its SOP and pre-event checklist.
+
+        Refuses to send for a programme whose date has passed — the content is entirely
+        preparatory, and arriving late it would only confuse the institution.
+        """
+        ev = self.get_event_for_guidelines(event_id)
+        if not ev:
+            return {"success": False, "error": f"No program found with ID {event_id}"}
+
+        start_date = ev.get('start_date')
+        event_date = start_date if isinstance(start_date, date) else None
+        if event_date is None and start_date:
+            try:
+                event_date = datetime.strptime(str(start_date)[:10], '%Y-%m-%d').date()
+            except ValueError:
+                event_date = None
+        if event_date and event_date <= date.today():
+            return {
+                "success": False,
+                "error": f"Program {event_id} is on {event_date}, which is not in the future.",
+                "hint": "Pre-event guidelines only apply to upcoming programs."
+            }
+
+        institute_email = (institute_email or ev.get('institution_email') or '').strip()
+        if not institute_email:
+            return {
+                "success": False,
+                "error": "No institute email on file or provided.",
+                "hint": "Provide the institute's email address and try again."
+            }
+
+        coordinator_email = (coordinator_email or '').strip()
+        cc_recipients = (
+            [coordinator_email]
+            if coordinator_email and coordinator_email.lower() != institute_email.lower()
+            else []
+        )
+
+        accompanying = self.get_accompanying_artists(ev.get('accompanying_artist'))
+        accompanying_str = ', '.join(
+            f"{a['name']} ({a['art_form']})" if a['art_form'] else a['name']
+            for a in accompanying
+        )
+
+        try:
+            sent = notification_service.send_pre_event_guidelines(
+                {
+                    'institution_name':           ev.get('institution_name') or '',
+                    'institute_coordinator_name': ev.get('institution_coordinator') or '',
+                    'module_name':                ev.get('module_name') or '',
+                    'artist_name':                ev.get('artist_name') or '',
+                    'art_form':                   ev.get('art_form') or '',
+                    'accompanying_artists':       accompanying_str,
+                    'event_date':                 str(start_date or ''),
+                    'event_time':                 ev.get('event_time') or '',
+                    'venue':                      ev.get('venue') or '',
+                    'coordinator_name':           coordinator_name or 'SPIC MACAY Team',
+                    'chapter':                    ev.get('chapter') or '',
+                },
+                [institute_email],
+                guidelines_pdf_bytes=self._load_guidelines_pdf(),
+                cc_recipients=cc_recipients,
+            )
+            cc_note = f" (cc: {coordinator_email})" if cc_recipients else ""
+            return {
+                "success": sent,
+                "event_id": event_id,
+                "recipient": institute_email,
+                "cc": coordinator_email if cc_recipients else None,
+                "message": (f"Pre-event guidelines sent to {institute_email}{cc_note}." if sent
+                            else f"Failed to send guidelines to {institute_email} — "
+                                 f"check SMTP configuration.")
+            }
+        except Exception as e:
+            logger.error(f"Error sending guidelines for event {event_id}: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
     def get_event_for_resend(self, event_id: int) -> Optional[Dict]:
         """Fetch a program with everything needed to regenerate its APR PDF and re-send the
         confirmation email — used by resend_apr_email()."""
@@ -807,7 +1037,6 @@ class EventService:
     def resend_apr_email(self, event_id: int, recipient_email: str, notification_service) -> dict:
         """Regenerate the APR PDF and re-send the confirmation email for an existing
         program — used by the dashboard's 'Resend APR Email' action."""
-        import re
         from app.services.pdf_service import generate_apr_pdf, load_poster_bytes
 
         ev = self.get_event_for_resend(event_id)
@@ -820,11 +1049,11 @@ class EventService:
         if not recipient_email:
             return {"success": False, "error": "Recipient email is required"}
 
-        accompanying_raw = ev.get('accompanying_artist') or ''
-        accompanying_artists = [
-            {'name': name.strip(), 'art_form': art.strip()}
-            for name, art in re.findall(r'([^,()]+)\(([^)]*)\)', accompanying_raw)
-        ]
+        accompanying_artists = self.get_accompanying_artists(ev.get('accompanying_artist'))
+        accompanying_raw = ', '.join(
+            f"{a['name']} ({a['art_form']})" if a['art_form'] else a['name']
+            for a in accompanying_artists
+        )
 
         pdf_event_data = {
             'artist_name':          ev.get('artist_name', 'N/A'),
@@ -885,6 +1114,163 @@ class EventService:
         except Exception as e:
             logger.error(f"Error resending APR email for event {event_id}: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
+
+    # The admin app records an artist payment by inserting a payment_artist_detail row with a
+    # non-zero artist_payment; there is no payment-status column. A completed payment is
+    # therefore the existence of that row, matching how the admin listing derives its badge.
+    _COMPLETED_PAYMENTS_SQL = """
+        SELECT
+            p.id            AS payment_id,
+            p.artist_payment,
+            p.payment_method,
+            p.txn_id,
+            p.dt_created    AS paid_on,
+            p.event_id,
+            p.artist_id,
+            p.custom_apr,
+            e.title,
+            e.start_date,
+            e.event_category AS module_name,
+            e.venue,
+            e.city,
+            e.state,
+            e.added_by      AS event_added_by,
+            a.name          AS artist_name,
+            a.email         AS artist_email,
+            a.art_form,
+            i.institution_name,
+            apr.request_id,
+            apr.created_by  AS apr_created_by
+        FROM payment_artist_detail p
+        LEFT JOIN event_list        e   ON e.id  = p.event_id
+        LEFT JOIN artists_list      a   ON a.tid = p.artist_id
+        LEFT JOIN institution_list  i   ON i.sid = e.institution
+        LEFT JOIN apr_payment_request apr ON apr.event_id = p.event_id
+        WHERE p.artist_payment IS NOT NULL
+          AND p.artist_payment > 0
+          AND p.dt_created >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
+        ORDER BY p.dt_created DESC
+    """
+
+    def _ensure_payment_notification_log(self) -> bool:
+        """Create the notification ledger if absent. Without it a payment stays inside the
+        30-day window for several weekly runs and would be announced again each time."""
+        try:
+            result = self.db.execute_query(
+                """
+                CREATE TABLE IF NOT EXISTS apr_payment_notification_log (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    payment_id VARCHAR(50) NOT NULL,
+                    event_id VARCHAR(50) NULL,
+                    artist_id VARCHAR(50) NULL,
+                    recipient_type VARCHAR(20) NOT NULL,
+                    recipient_email VARCHAR(255) NOT NULL,
+                    sent_at DATETIME NOT NULL,
+                    UNIQUE KEY uniq_payment_recipient (payment_id, recipient_type, recipient_email)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """,
+                commit=True,
+            )
+            return bool(result and result.get('success'))
+        except Exception as e:
+            logger.error(f"Could not ensure payment notification log: {e}")
+            return False
+
+    def get_completed_payments(self, since_days: int = 30,
+                               exclude_notified: bool = True) -> List[Dict]:
+        """
+        Artist payments the finance team completed within the last `since_days`.
+
+        Each row carries the artist and coordinator context needed to send the two
+        payment-confirmation emails.
+        """
+        try:
+            rows = self.db.fetch_all(self._COMPLETED_PAYMENTS_SQL, (int(since_days),)) or []
+
+            for row in rows:
+                row['coordinator_email'] = self._resolve_coordinator_email(
+                    row.get('apr_created_by') or row.get('event_added_by')
+                )
+
+            if not exclude_notified:
+                return rows
+
+            self._ensure_payment_notification_log()
+            notified = self.db.fetch_all(
+                "SELECT payment_id, recipient_type FROM apr_payment_notification_log"
+            ) or []
+            already = {(str(n['payment_id']), n['recipient_type']) for n in notified}
+
+            pending = []
+            for row in rows:
+                pid = str(row['payment_id'])
+                row['notify_artist'] = (
+                    bool(row.get('artist_email')) and (pid, 'artist') not in already
+                )
+                row['notify_coordinator'] = (
+                    bool(row.get('coordinator_email')) and (pid, 'coordinator') not in already
+                )
+                if row['notify_artist'] or row['notify_coordinator']:
+                    pending.append(row)
+            return pending
+
+        except Exception as e:
+            logger.error(f"Error fetching completed payments: {e}", exc_info=True)
+            return []
+
+    def _resolve_coordinator_email(self, created_by) -> str:
+        """
+        Recover a coordinator's address from an APR's created_by value, which is a numeric
+        users_field_data.uid on new records but a bare name or email on older ones.
+        """
+        if created_by is None:
+            return ''
+        value = str(created_by).strip()
+        if not value:
+            return ''
+
+        if '@' in value:
+            return value
+
+        try:
+            if value.isdigit():
+                row = self.db.fetch_one(
+                    "SELECT mail FROM users_field_data WHERE uid = %s LIMIT 1", (int(value),)
+                )
+            else:
+                row = self.db.fetch_one(
+                    "SELECT mail FROM users_field_data WHERE name = %s AND status = 1 LIMIT 1",
+                    (value,),
+                )
+            return (row.get('mail') or '').strip() if row else ''
+        except Exception as e:
+            logger.error(f"Error resolving coordinator email for {created_by!r}: {e}")
+            return ''
+
+    def record_payment_notification(self, payment_id, recipient_type: str,
+                                    recipient_email: str, event_id=None, artist_id=None) -> bool:
+        """Mark one payment as announced to one party so later runs skip it."""
+        try:
+            result = self.db.execute_query(
+                """
+                INSERT IGNORE INTO apr_payment_notification_log
+                    (payment_id, event_id, artist_id, recipient_type, recipient_email, sent_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    str(payment_id),
+                    str(event_id) if event_id is not None else None,
+                    str(artist_id) if artist_id is not None else None,
+                    recipient_type,
+                    recipient_email,
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                ),
+                commit=True,
+            )
+            return bool(result and result.get('success'))
+        except Exception as e:
+            logger.error(f"Error recording payment notification: {e}")
+            return False
 
     def update_event_status(self, event_id: int, status: str, updated_by: str) -> bool:
         """Update event status"""

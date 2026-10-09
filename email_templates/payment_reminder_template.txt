@@ -1,21 +1,21 @@
-Subject: Request for Feedback & Program Contribution – SPIC MACAY
+Subject: Thank You — Programme Feedback & Contribution Details – SPIC MACAY
 
 {salutation}
 
 Greetings from SPIC MACAY!
 
-We sincerely thank you and your institution for partnering with us to host under the SPIC MACAY movement. We hope the students and faculty had a memorable experience and that the session inspired them to explore India's rich cultural heritage further.
+Thank you for partnering with us to host this programme under the SPIC MACAY movement. We hope the students and faculty enjoyed the session and that it opened a door to India's rich cultural heritage for them.
 
-As part of our continuous effort to improve and make future programs more impactful, we would greatly appreciate your feedback on the program. Kindly take a few minutes to fill out this short feedback form:
+We would love to hear how it went. If you can spare a few minutes, your feedback genuinely shapes how we plan future programmes:
 {feedback_form_line}
 
-Additionally, we would like to gently remind you to process the program contribution/payment for the session as per the guidelines shared earlier. Timely contributions help us sustain and expand our outreach, bringing more artists and experiences to schools and colleges across the country.
+For your records, we have also enclosed the details of the contribution towards the programme, along with our bank particulars, should your office wish to process it at its convenience. Contributions from host institutions are what allow us to take artists to more schools and colleges across the country.
 
-If you have already completed the payment or shared your feedback, kindly treat this as a gentle reminder.
+If this has already been arranged, please do treat this note simply as an acknowledgement, with our thanks.
 
-For any queries or assistance, please feel free to write to us at info@spicmacay.com.
+For anything at all, we are reachable at info@spicmacay.com.
 
-Thank you once again for your valuable support in taking this movement forward. Together, we are inspiring thousands of young minds across the nation.
+Thank you once again for your support in taking this movement forward.
 
 Warm regards,
 {coordinator_name}

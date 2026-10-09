@@ -226,14 +226,23 @@ class DatabaseValidator:
         return ' '.join(cleaned).strip() or name
 
     def search_artists(self, search_term: str) -> List[Dict]:
-        """Search for artists with fuzzy matching; strips honorifics since DB stores bare names"""
+        """
+        Search for artists with fuzzy matching.
+
+        Honorifics are inconsistent in this directory — some records are stored bare
+        ("Wasifuddin Dagar") and others carry the full title ("Padma Shri Ustad Faiyaz
+        Wasifuddin Dagar"). So both the raw term and an honorific-stripped version are
+        matched, and relevance is scored on whichever form fits better. Matching only the
+        stripped term made an artist's exact stored name return nothing.
+        """
         conn = None
         cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor(dictionary=True)
 
-            clean_term = self._clean_artist_search_term(search_term)
+            raw_term = (search_term or '').strip()
+            clean_term = self._clean_artist_search_term(raw_term)
 
             query = """
                 SELECT
@@ -243,39 +252,43 @@ class DatabaseValidator:
                 WHERE status = 1
                 AND (
                     name LIKE %s
+                    OR name LIKE %s
                     OR art_form LIKE %s
+                    OR SOUNDEX(name) = SOUNDEX(%s)
                     OR SOUNDEX(name) = SOUNDEX(%s)
                 )
                 ORDER BY
                     CASE
                         WHEN name = %s THEN 1
-                        WHEN name LIKE %s THEN 2
-                        ELSE 3
+                        WHEN name = %s THEN 2
+                        WHEN name LIKE %s THEN 3
+                        ELSE 4
                     END
-                LIMIT 10
+                LIMIT 15
             """
 
-            search_pattern = f"%{clean_term}%"
-            exact_pattern = f"{clean_term}%"
-
             cursor.execute(query, (
-                search_pattern, search_pattern, clean_term,
-                clean_term, exact_pattern
+                f"%{raw_term}%", f"%{clean_term}%", f"%{clean_term}%",
+                clean_term, raw_term,
+                raw_term, clean_term, f"{clean_term}%",
             ))
 
             results = cursor.fetchall()
 
-            # Score relevance against the cleaned term so honorifics don't hurt the match ratio
+            raw_lower = raw_term.lower()
+            clean_lower = clean_term.lower()
             for result in results:
-                similarity = difflib.SequenceMatcher(
-                    None,
-                    clean_term.lower(),
-                    result['name'].lower()
-                ).ratio()
-                result['relevance'] = round(similarity, 2)
+                stored = (result['name'] or '').strip()
+                stored_clean = self._clean_artist_search_term(stored).lower()
+                # Best of: term vs stored name, and both sides stripped of honorifics
+                relevance = max(
+                    difflib.SequenceMatcher(None, raw_lower, stored.lower()).ratio(),
+                    difflib.SequenceMatcher(None, clean_lower, stored_clean).ratio(),
+                )
+                result['relevance'] = round(relevance, 2)
 
-            return sorted(results, key=lambda x: x['relevance'], reverse=True)
-            
+            return sorted(results, key=lambda x: x['relevance'], reverse=True)[:10]
+
         except mysql.connector.Error as e:
             logger.error(f"Database error in search_artists: {e}")
             return []
@@ -338,6 +351,154 @@ class DatabaseValidator:
             if conn:
                 conn.close()
     
+    def get_coordinator_by_id(self, uid) -> Optional[Dict]:
+        """
+        Resolve a coordinator's name and email from their portal user id.
+
+        event_list.added_by stores this id, not a name — anything that displays the
+        coordinator (a poster credit, an email) has to translate it first, or it shows
+        a bare number.
+        """
+        try:
+            uid = int(uid)
+        except (TypeError, ValueError):
+            return None
+
+        conn = None
+        cursor = None
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT uid, name, mail AS email FROM users_field_data WHERE uid = %s",
+                (uid,),
+            )
+            return cursor.fetchone()
+        except mysql.connector.Error as e:
+            logger.error(f"Database error in get_coordinator_by_id: {e}")
+            return None
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def search_coordinators(self, search_term: str) -> List[Dict]:
+        """
+        Fuzzy-search a coordinator by name to recover a known email address.
+
+        Draws on two independent sources that both act as "coordinator" records:
+        portal user accounts (users_field_data) and the contact person named on an
+        institution record (institution_list.name_of_the_coordinator).
+        """
+        term = (search_term or '').strip()
+        if not term:
+            return []
+
+        like = f"%{term}%"
+        prefix = f"{term}%"
+        candidates: List[Dict] = []
+
+        conn = None
+        cursor = None
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor(dictionary=True)
+
+            cursor.execute(
+                """
+                SELECT uid, name, mail
+                FROM users_field_data
+                WHERE status = 1 AND mail IS NOT NULL AND mail <> ''
+                AND (name LIKE %s OR mail LIKE %s OR SOUNDEX(name) = SOUNDEX(%s))
+                ORDER BY CASE WHEN name = %s THEN 1 WHEN name LIKE %s THEN 2 ELSE 3 END
+                LIMIT 10
+                """,
+                (like, like, term, term, prefix),
+            )
+            for row in cursor.fetchall():
+                candidates.append({
+                    'source': 'user',
+                    'uid': row['uid'],
+                    'name': row['name'],
+                    'email': row['mail'],
+                    'institution_name': None,
+                })
+
+            cursor.execute(
+                """
+                SELECT sid, institution_name, name_of_the_coordinator, email
+                FROM institution_list
+                WHERE status = 1 AND email IS NOT NULL AND email <> ''
+                AND name_of_the_coordinator IS NOT NULL AND name_of_the_coordinator <> ''
+                AND (name_of_the_coordinator LIKE %s
+                     OR SOUNDEX(name_of_the_coordinator) = SOUNDEX(%s))
+                LIMIT 10
+                """,
+                (like, term),
+            )
+            for row in cursor.fetchall():
+                candidates.append({
+                    'source': 'institution',
+                    'uid': None,
+                    'sid': row['sid'],
+                    'name': row['name_of_the_coordinator'],
+                    'email': row['email'],
+                    'institution_name': row['institution_name'],
+                })
+
+            term_lower = term.lower()
+            for c in candidates:
+                c['relevance'] = round(
+                    difflib.SequenceMatcher(None, term_lower, (c['name'] or '').lower()).ratio(), 2
+                )
+
+            # One person can appear in both sources; keep the best-scoring row per address
+            best_by_email: Dict[str, Dict] = {}
+            for c in sorted(candidates, key=lambda x: x['relevance'], reverse=True):
+                best_by_email.setdefault(c['email'].strip().lower(), c)
+
+            return sorted(best_by_email.values(), key=lambda x: x['relevance'], reverse=True)[:5]
+
+        except mysql.connector.Error as e:
+            logger.error(f"Database error in search_coordinators: {e}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def resolve_user_uid(self, email: str = '', name: str = '') -> Optional[int]:
+        """
+        Map a coordinator to their numeric users_field_data.uid.
+
+        event_list.added_by and apr_payment_request.created_by are numeric user IDs in the
+        admin app's schema, so a name string written there is unreadable to that app.
+        Email is matched first because it is unique; name is only a fallback.
+        """
+        try:
+            if email and email.strip():
+                row = self.db_manager.fetch_one(
+                    "SELECT uid FROM users_field_data WHERE mail = %s AND status = 1 LIMIT 1",
+                    (email.strip(),),
+                )
+                if row:
+                    return int(row['uid'])
+
+            if name and name.strip():
+                row = self.db_manager.fetch_one(
+                    "SELECT uid FROM users_field_data WHERE name = %s AND status = 1 LIMIT 1",
+                    (name.strip(),),
+                )
+                if row:
+                    return int(row['uid'])
+
+            return None
+        except Exception as e:
+            logger.error(f"Error resolving user uid: {e}")
+            return None
+
     def get_event_modules(self) -> List[Dict]:
         """Get available event modules"""
         conn = None

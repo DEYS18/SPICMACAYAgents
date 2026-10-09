@@ -134,6 +134,11 @@ class AgentRouter:
             'search program',
             'my apr',
             'recent apr',
+            # Poster intents — a poster is built from programme details held by this
+            # agent, and asking for one starts the same collection flow as an APR
+            'poster',
+            'flyer',
+            'publicity material',
             # Payment reminder intents
             'pending payment',
             'payment pending',

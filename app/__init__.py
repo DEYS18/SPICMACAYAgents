@@ -9,6 +9,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 import os
 import logging
+from datetime import timedelta
 from logging.handlers import RotatingFileHandler
 import traceback
 from app.services.voice_service import VoiceService  # NEW
@@ -84,7 +85,24 @@ def create_app(config=None):
     # ========================================
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
     app.config['DEBUG'] = os.getenv('DEBUG', 'False').lower() == 'true'
-    
+
+    # The session cookie identifies which conversation a request belongs to, so it has to
+    # survive a working day and stay out of reach of page scripts.
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', 'False').lower() == 'true'
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
+
+    # Conversations are kept apart by the id inside this signed cookie, so a guessable
+    # key would let someone forge one and land in another coordinator's session.
+    if app.config['SECRET_KEY'] in ('dev-secret-key-change-in-production',
+                                    'your-secret-key-here-change-in-production'):
+        app.logger.warning(
+            "SECRET_KEY is still the default placeholder — set a real one in .env "
+            "(python -c \"import secrets; print(secrets.token_hex(32))\"). "
+            "Conversation isolation between users depends on it."
+        )
+
     # Database configuration
     app.config['DB_CONFIG'] = {
         'pool_name': 'spicmacay_pool',
@@ -273,19 +291,27 @@ def create_app(config=None):
     
     try:
         from app.models.main_agent import ConversationalAgent
-        
-        # Create the main agent (which initializes sub-agents internally)
-        agent = ConversationalAgent(
-            api_key=app.config['OPENAI_API_KEY'],
-            db_manager=db_manager,
-            db_validator=db_validator,
-            event_service=event_service,
-            notification_service=notification_service
-        )
-        
-        # Store in app context - accessible via current_app.agent
+        from app.services.session_manager import ConversationRegistry
+
+        def _build_agent():
+            """One agent per conversation — see app/services/session_manager.py."""
+            return ConversationalAgent(
+                api_key=app.config['OPENAI_API_KEY'],
+                db_manager=db_manager,
+                db_validator=db_validator,
+                event_service=event_service,
+                notification_service=notification_service
+            )
+
+        # Built once at startup so a misconfiguration fails here rather than on a
+        # user's first message. Conversations never use this instance.
+        agent = _build_agent()
+
+        app.agent_factory = _build_agent
+        app.conversation_registry = ConversationRegistry(_build_agent)
+        # Kept for health/status probes only; per-conversation state lives in the registry
         app.agent = agent
-        
+
         app.logger.info("  SPIC MACAY Agent (Event Creation) - Ready")
         app.logger.info("  Workflow Agent (Information Queries) - Ready")
         app.logger.info("  Agent Router (Intelligent Routing) - Ready")

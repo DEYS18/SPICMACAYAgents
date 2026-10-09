@@ -19,6 +19,20 @@ class UnifiedChatInterface extends ChatInterface {
         
         // ✅ Store reference to media API
         this.mediaDevicesAPI = null;
+
+        // Voice activity detection — ends the take once the speaker stops, so a pause
+        // isn't recorded as trailing silence and sent to Whisper.
+        this.vad = null;
+        this.discardRecording = false;
+        this.vadConfig = {
+            silenceHangMs:      1400,  // quiet time after speech before auto-stop
+            minSpeechMs:        350,   // ignore coughs/clicks shorter than this
+            noSpeechTimeoutMs:  9000,  // give up if nobody speaks at all
+            maxRecordingMs:     60000, // hard ceiling on one take
+            calibrationMs:      350,   // sample the room's noise floor first
+            speechMultiplier:   2.4,   // speech = this much above the noise floor
+            minThreshold:       0.012, // floor, for very quiet microphones
+        };
         
         // Voice DOM elements
         this.micBtn = document.getElementById('mic-btn');
@@ -187,6 +201,137 @@ class UnifiedChatInterface extends ChatInterface {
         }
     }
     
+    /**
+     * Watch the live audio level and stop the recording once the speaker has finished.
+     *
+     * The noise floor is measured from the room for the first few hundred milliseconds
+     * rather than assumed, so a noisy room doesn't read as constant speech and a quiet
+     * one doesn't swallow a soft voice.
+     */
+    startVAD(stream) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) {
+            console.warn('[VAD] Web Audio API unavailable — falling back to manual stop');
+            return;
+        }
+
+        try {
+            const cfg = this.vadConfig;
+            const audioContext = new AudioCtx();
+            const source = audioContext.createMediaStreamSource(stream);
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 1024;
+            analyser.smoothingTimeConstant = 0.6;
+            source.connect(analyser);
+
+            const buffer = new Float32Array(analyser.fftSize);
+            const startedAt = performance.now();
+
+            const state = {
+                audioContext, source, analyser,
+                rafId: null,
+                noiseSum: 0,
+                noiseCount: 0,
+                threshold: null,
+                speechMs: 0,
+                lastLoudAt: null,
+                lastFrameAt: startedAt,
+                startedAt,
+                stopped: false,
+            };
+            this.vad = state;
+
+            const tick = () => {
+                if (state.stopped || !this.isRecording) return;
+
+                const now = performance.now();
+                const dt = now - state.lastFrameAt;
+                state.lastFrameAt = now;
+
+                analyser.getFloatTimeDomainData(buffer);
+                let sum = 0;
+                for (let i = 0; i < buffer.length; i++) sum += buffer[i] * buffer[i];
+                const rms = Math.sqrt(sum / buffer.length);
+
+                const elapsed = now - state.startedAt;
+
+                if (elapsed < cfg.calibrationMs) {
+                    state.noiseSum += rms;
+                    state.noiseCount++;
+                    this.updateMicrophoneStatus('🎙️ Listening…', 'Calibrating — start speaking');
+                    state.rafId = requestAnimationFrame(tick);
+                    return;
+                }
+
+                if (state.threshold === null) {
+                    const noiseFloor = state.noiseCount ? state.noiseSum / state.noiseCount : 0;
+                    state.threshold = Math.max(noiseFloor * cfg.speechMultiplier, cfg.minThreshold);
+                    console.log('[VAD] noise floor', noiseFloor.toFixed(4),
+                                '→ threshold', state.threshold.toFixed(4));
+                }
+
+                if (rms > state.threshold) {
+                    state.speechMs += dt;
+                    state.lastLoudAt = now;
+                } else if (state.lastLoudAt !== null) {
+                    const quietFor = now - state.lastLoudAt;
+                    if (state.speechMs >= cfg.minSpeechMs && quietFor >= cfg.silenceHangMs) {
+                        console.log('[VAD] speech ended — auto-stopping');
+                        this.updateMicrophoneStatus('✅ Done speaking', 'Transcribing…');
+                        this.stopRecording();
+                        return;
+                    }
+                }
+
+                if (state.lastLoudAt === null && elapsed > cfg.noSpeechTimeoutMs) {
+                    console.log('[VAD] no speech detected — cancelling');
+                    this.discardRecording = true;
+                    this.updateMicrophoneStatus('No speech detected', 'Click the mic to try again');
+                    this.stopRecording();
+                    return;
+                }
+
+                if (elapsed > cfg.maxRecordingMs) {
+                    console.log('[VAD] maximum recording length reached');
+                    this.stopRecording();
+                    return;
+                }
+
+                if (state.lastLoudAt !== null) {
+                    const level = Math.min(100, Math.round((rms / state.threshold) * 40));
+                    this.updateMicrophoneStatus(
+                        '🔴 Recording…',
+                        rms > state.threshold
+                            ? `Listening ${'▁▂▃▄▅▆▇█'[Math.min(7, Math.floor(level / 13))].repeat(6)}`
+                            : 'Pause detected — will send shortly'
+                    );
+                }
+
+                state.rafId = requestAnimationFrame(tick);
+            };
+
+            state.rafId = requestAnimationFrame(tick);
+        } catch (err) {
+            console.warn('[VAD] Could not start voice activity detection:', err);
+            this.vad = null;
+        }
+    }
+
+    stopVAD() {
+        const state = this.vad;
+        if (!state) return;
+        state.stopped = true;
+        if (state.rafId) cancelAnimationFrame(state.rafId);
+        try {
+            state.source.disconnect();
+            state.analyser.disconnect();
+            if (state.audioContext.state !== 'closed') state.audioContext.close();
+        } catch (err) {
+            console.warn('[VAD] Cleanup issue:', err);
+        }
+        this.vad = null;
+    }
+
     async toggleVoiceInput() {
         console.log('[Voice] toggleVoiceInput called, isRecording:', this.isRecording);
         
@@ -256,16 +401,26 @@ class UnifiedChatInterface extends ChatInterface {
             
             this.mediaRecorder.onstop = async () => {
                 console.log('[Voice] Recording stopped, chunks:', this.audioChunks.length);
+                this.stopVAD();
+
                 const audioBlob = new Blob(this.audioChunks, { type: mimeType || 'audio/webm' });
                 console.log('[Voice] Blob size:', audioBlob.size, 'bytes');
-                
-                await this.transcribeAudio(audioBlob);
-                
-                // Stop tracks
+
+                // Stop tracks first so the mic indicator clears even if transcription fails
                 stream.getTracks().forEach(track => {
                     console.log('[Voice] Stopping track:', track.label);
                     track.stop();
                 });
+
+                if (this.discardRecording) {
+                    // Silence-only take — nothing worth sending to Whisper
+                    console.log('[Voice] Discarding silent recording');
+                    this.discardRecording = false;
+                    this.audioChunks = [];
+                    return;
+                }
+
+                await this.transcribeAudio(audioBlob);
             };
             
             this.mediaRecorder.onerror = (event) => {
@@ -273,18 +428,22 @@ class UnifiedChatInterface extends ChatInterface {
             };
             
             // Start recording
+            this.discardRecording = false;
             this.mediaRecorder.start();
             this.isRecording = true;
-            
+
             // Update UI
             if (this.micBtn) {
                 this.micBtn.classList.add('recording');
                 this.micBtn.disabled = false;
             }
-            
-            this.updateMicrophoneStatus('🔴 Recording... Click to stop', 'Speak clearly');
-            
+
+            this.updateMicrophoneStatus('🎙️ Listening…', 'Speak now — I\'ll stop when you pause');
+
             if (this.waveform) this.waveform.classList.add('active');
+
+            // Auto-stop on silence; the mic button still stops it manually at any point
+            this.startVAD(stream);
             
             console.log('[Voice] ✅ Recording started successfully');
             
@@ -342,11 +501,14 @@ class UnifiedChatInterface extends ChatInterface {
     async stopRecording() {
         if (this.mediaRecorder && this.isRecording) {
             console.log('[Voice] Stopping recording...');
+            this.isRecording = false;   // set first, so a queued VAD frame bails out
+            this.stopVAD();
             this.mediaRecorder.stop();
-            this.isRecording = false;
-            
+
             if (this.micBtn) this.micBtn.classList.remove('recording');
-            this.updateMicrophoneStatus('Processing...', 'Transcribing audio');
+            if (!this.discardRecording) {
+                this.updateMicrophoneStatus('Processing...', 'Transcribing audio');
+            }
             if (this.waveform) this.waveform.classList.remove('active');
         }
     }
@@ -375,10 +537,12 @@ class UnifiedChatInterface extends ChatInterface {
                 this.updateCharCount();
                 
                 this.updateMicrophoneStatus('✅ Complete!', 'Sending message...');
-                
+
+                // Brief pause so the transcript is visible before it's sent; the old
+                // longer wait existed to cover the manual stop and is no longer needed.
                 setTimeout(() => {
                     this.sendMessage();
-                }, 1000);
+                }, 350);
                 
             } else {
                 console.error('[Voice] Transcription failed:', data.error);

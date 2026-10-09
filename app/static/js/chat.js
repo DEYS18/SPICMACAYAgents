@@ -212,7 +212,13 @@ class ChatInterface {
             if (data.success) {
                 // Update current agent type
                 this.currentAgentType = data.agent_type;
-                
+
+                // The attachment was taken as an artist portrait, not program photos —
+                // drop it from the strip so it isn't sent again with the next message
+                if (data.photos_consumed) {
+                    this._clearPhotos();
+                }
+
                 // Display bot response with agent type (attach a download button — APR PDF
                 // or generated poster, whichever this reply produced — if one is ready)
                 this.displayMessage(data.response, 'bot', data.agent_type,

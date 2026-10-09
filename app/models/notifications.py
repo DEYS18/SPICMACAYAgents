@@ -384,11 +384,12 @@ class NotificationService:
             body_html = self._create_payment_reminder_html(reminder_data)
 
             msg = MIMEMultipart('mixed')
-            msg['Subject'] = f"Gentle Reminder: Program Contribution Pending – SPIC MACAY ({reminder_data.get('institution_name', '')})".strip()
+            msg['Subject'] = f"Thank You — Programme Feedback & Contribution Details – SPIC MACAY ({reminder_data.get('institution_name', '')})".strip()
             msg['From'] = self.smtp_config['from_email']
             msg['To'] = ', '.join(recipients)
-            if cc_recipients:
-                msg['Cc'] = ', '.join(cc_recipients)
+            cc_list = self._outbound_cc(recipients, *(cc_recipients or []))
+            if cc_list:
+                msg['Cc'] = ', '.join(cc_list)
 
             # Plain text alternative first, HTML preferred — mail clients render the last
             # part in a multipart/alternative that they understand, so HTML goes last.
@@ -550,11 +551,11 @@ class NotificationService:
         </div>
         <div class="content">
             <p>{salutation}</p>
-            <span class="pill">🙏 Gentle Reminder</span>
+            <span class="pill">🙏 With Our Thanks</span>
             <p>
-                This is a gentle reminder regarding the pending contribution/payment for the program
-                execution below. Your support helps us seamlessly continue our movement of introducing
-                Indian classical music and culture to the youth.
+                Thank you for hosting this programme under the SPIC MACAY movement. We hope the
+                students and faculty enjoyed the session and that it opened a door to India's rich
+                cultural heritage for them.
             </p>
 
             <div class="facts">
@@ -562,23 +563,22 @@ class NotificationService:
                     <tr><td class="label">Institute Name</td><td>{institution_name}</td></tr>
                     <tr><td class="label">Event Date / Type</td><td>{event_date} / {module_name}</td></tr>
                     <tr><td class="label">Artist(s) Featured</td><td>{artist_name}</td></tr>
-                    <tr><td class="label">Invoice / APR Reference No.</td><td>{request_id}</td></tr>
+                    <tr><td class="label">Reference No.</td><td>{request_id}</td></tr>
                     {feedback_row}
                 </table>
             </div>
 
             <div class="amount-box">
-                <div class="label">Pending Amount</div>
+                <div class="label">Contribution towards the programme</div>
                 <div class="value">{amount_str}</div>
             </div>
 
-            <p>A detailed Request for Payment invoice is attached to this email as a PDF, with our
-               bank details for the transfer.</p>
+            <p>The details are enclosed as a PDF along with our bank particulars, should your office
+               wish to process the contribution at its convenience. Contributions from host institutions
+               are what allow us to take artists to more schools and colleges across the country.</p>
 
-            <p>If the payment has already been initiated, please simply share the transaction receipt
-               with us — no further action needed on your part.</p>
-
-            <p>Thank you for your invaluable support in keeping our cultural heritage alive.</p>
+            <p>If this has already been arranged, please do treat this note simply as an
+               acknowledgement, with our thanks.</p>
 
             <p style="margin-top: 24px;">
                 Warm regards,<br>
@@ -587,7 +587,7 @@ class NotificationService:
             </p>
         </div>
         <div class="footer">
-            <p>This is an automated email from the SPIC MACAY Supatra AI Platform.</p>
+            <p>This is an automated email from the SPIC MACAY Supatra Platform.</p>
             <p>&copy; {datetime.now().year} SPIC MACAY. All rights reserved.</p>
         </div>
     </div>
@@ -734,11 +734,11 @@ class NotificationService:
 
             <p style="margin-top: 24px;">
                 Warm regards,<br>
-                <strong>SPIC MACAY Supatra AI Platform</strong>
+                <strong>SPIC MACAY Supatra Platform</strong>
             </p>
         </div>
         <div class="footer">
-            <p>This is an automated weekly email from the SPIC MACAY Supatra AI Platform.</p>
+            <p>This is an automated weekly email from the SPIC MACAY Supatra Platform.</p>
             <p>&copy; {datetime.now().year} SPIC MACAY. All rights reserved.</p>
         </div>
     </div>
@@ -853,14 +853,472 @@ class NotificationService:
 
             <p style="margin-top: 24px;">
                 Warm regards,<br>
-                <strong>SPIC MACAY Supatra AI Platform</strong>
+                <strong>SPIC MACAY Supatra Platform</strong>
             </p>
         </div>
         <div class="footer">
-            <p>This is an automated weekly email from the SPIC MACAY Supatra AI Platform.</p>
+            <p>This is an automated weekly email from the SPIC MACAY Supatra Platform.</p>
             <p>&copy; {datetime.now().year} SPIC MACAY. All rights reserved.</p>
         </div>
     </div>
 </body>
 </html>
 """
+
+    # ── Programme lifecycle emails ───────────────────────────────────────────
+
+    _LIFECYCLE_STYLE = """
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #3D2B00; }
+        .container { max-width: 620px; margin: 0 auto; padding: 20px; }
+        .header {
+            background: linear-gradient(135deg, #FDEFB8 0%, #F7C948 55%, #E8A800 100%);
+            color: #8B0000; padding: 28px 30px; text-align: center;
+            border-radius: 10px 10px 0 0; border-bottom: 4px solid #B3161C;
+        }
+        .header h1 { margin: 0; font-size: 21px; }
+        .header p { margin: 6px 0 0; opacity: .85; font-size: 13px; }
+        .content { background: #FFFBEF; padding: 28px; border-radius: 0 0 10px 10px; }
+        .pill {
+            display: inline-block; background: #fff3cd; border: 2px solid #ffc107;
+            color: #7a5b00; font-weight: 700; padding: 6px 16px; border-radius: 20px;
+            font-size: 13px; margin-bottom: 16px;
+        }
+        .facts {
+            background: white; border-radius: 10px; border-left: 4px solid #B3161C;
+            padding: 4px 20px; margin: 18px 0; box-shadow: 0 2px 8px rgba(0,0,0,.04);
+        }
+        .facts table { width: 100%; border-collapse: collapse; }
+        .facts td { padding: 9px 0; border-bottom: 1px solid #F0E6C8; font-size: 14px; vertical-align: top; }
+        .facts tr:last-child td { border-bottom: none; }
+        .facts td.label { font-weight: 700; color: #8B0000; width: 42%; }
+        .amount-box {
+            background: linear-gradient(135deg, #FDEFB8 0%, #F7C948 100%);
+            border: 2px solid #E8A800; border-radius: 10px; padding: 16px 20px;
+            margin: 18px 0; text-align: center;
+        }
+        .amount-box .label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #7a5b00; font-weight: 700; }
+        .amount-box .value { font-size: 28px; font-weight: 800; color: #8B0000; margin-top: 4px; }
+        .sop h3 { color: #8B0000; font-size: 15px; margin: 18px 0 6px; }
+        .sop ul { margin: 0 0 10px; padding-left: 20px; }
+        .sop li { font-size: 13.5px; margin-bottom: 4px; }
+        .attach-note { font-size: 13px; color: #7A6050; margin-top: 14px; }
+        .footer { text-align: center; color: #7A6050; font-size: 12px; margin-top: 24px; padding-top: 16px; border-top: 1px solid #EEE0BE; }
+    """
+
+    @staticmethod
+    def _fmt_date(value) -> str:
+        """Render a stored date as '09 Mar 2026', leaving anything unparseable as-is."""
+        if not value:
+            return 'N/A'
+        text = str(value)
+        for fmt in ('%Y-%m-%d', '%d-%m-%Y'):
+            try:
+                return datetime.strptime(text[:10], fmt).strftime('%d %b %Y')
+            except ValueError:
+                continue
+        return text
+
+    @staticmethod
+    def _fmt_amount(amount) -> str:
+        try:
+            return f"₹{float(amount):,.0f}"
+        except (TypeError, ValueError):
+            return str(amount) if amount else 'N/A'
+
+    def _outbound_cc(self, to_recipients: list, *addresses) -> list:
+        """
+        CC list for anything addressed outward to an institution or an artist: the
+        coordinator handling the programme, plus the central/finance team configured in
+        APR_CC_RECIPIENTS — so the office always holds a copy of what went out in its name.
+
+        Blanks are dropped, addresses are de-duplicated case-insensitively, and anyone
+        already in the To line is skipped so they don't receive it twice.
+        """
+        seen = {(a or '').strip().lower() for a in (to_recipients or []) if a}
+        cc = []
+        candidates = list(addresses) + list(self.smtp_config.get('apr_cc_recipients') or [])
+        for address in candidates:
+            clean = (address or '').strip()
+            if not clean or clean.lower() in seen:
+                continue
+            seen.add(clean.lower())
+            cc.append(clean)
+        return cc
+
+    def _deliver(self, msg, recipients: list, label: str) -> bool:
+        """Open one SMTP session and send an assembled message."""
+        try:
+            with smtplib.SMTP(self.smtp_config['host'], self.smtp_config['port']) as server:
+                server.starttls()
+                server.login(self.smtp_config['user'], self.smtp_config['password'])
+                server.send_message(msg)
+            logger.info(f"{label} sent to {recipients}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send {label}: {e}", exc_info=True)
+            return False
+
+    def _shell(self, title: str, inner_html: str) -> str:
+        """Wrap body content in the shared branded frame used by lifecycle emails."""
+        return f"""<!DOCTYPE html>
+<html>
+<head><style>{self._LIFECYCLE_STYLE}</style></head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎭 SPIC MACAY</h1>
+            <p>Society for the Promotion of Indian Classical Music And Culture Amongst Youth</p>
+        </div>
+        <div class="content">
+            <h2 style="color:#8B0000; font-size:18px; margin-top:0;">{title}</h2>
+            {inner_html}
+        </div>
+        <div class="footer">
+            <p>This is an automated email from the SPIC MACAY Supatra Platform.</p>
+            <p>&copy; {datetime.now().year} SPIC MACAY. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>"""
+
+    def send_pre_event_guidelines(self, event_data: dict, recipients: list,
+                                  guidelines_pdf_bytes: bytes = None,
+                                  cc_recipients: list = None) -> bool:
+        """
+        Send the host institution its pre-programme SOP and checklist. Only meaningful
+        before the programme takes place, so callers must gate this on a future date.
+
+        The checklist is written into the body as well as attached, so it stays readable
+        where the attachment is stripped or ignored.
+        """
+        if not self.enabled:
+            logger.info("Email notifications disabled, skipping pre-event guidelines")
+            return False
+
+        institution = event_data.get('institution_name') or 'your institution'
+        contact = (event_data.get('institute_coordinator_name') or '').strip()
+        salutation = f"Dear {contact}," if contact else "Dear Sir/Madam,"
+        coordinator_name = event_data.get('coordinator_name') or 'SPIC MACAY Team'
+        chapter = event_data.get('chapter') or ''
+
+        accompanying = (event_data.get('accompanying_artists') or '').strip()
+        accompanying_row = (
+            f'<tr><td class="label">Accompanying Artists</td><td>{accompanying}</td></tr>'
+            if accompanying else ''
+        )
+        art_form_suffix = f" — {event_data.get('art_form')}" if event_data.get('art_form') else ''
+        attach_note = ('<p class="attach-note">📎 The complete guidelines are attached as a PDF.</p>'
+                       if guidelines_pdf_bytes else '')
+
+        inner = f"""
+            <p>{salutation}</p>
+            <span class="pill">📅 Upcoming Programme</span>
+            <p>Greetings from SPIC MACAY! We are delighted to confirm the following programme
+               at {institution}.</p>
+
+            <div class="facts">
+                <table>
+                    <tr><td class="label">Programme</td><td>{event_data.get('module_name') or 'Programme'}</td></tr>
+                    <tr><td class="label">Artist</td><td>{event_data.get('artist_name') or 'N/A'}{art_form_suffix}</td></tr>
+                    {accompanying_row}
+                    <tr><td class="label">Date</td><td>{self._fmt_date(event_data.get('event_date'))}</td></tr>
+                    <tr><td class="label">Time</td><td>{event_data.get('event_time') or 'To be confirmed'}</td></tr>
+                    <tr><td class="label">Venue</td><td>{event_data.get('venue') or institution}</td></tr>
+                </table>
+            </div>
+
+            <p>To help the session run beautifully, here is a short summary of what we request
+               from the host institution.</p>
+
+            <div class="sop">
+                <h3>Travel</h3>
+                <ul>
+                    <li>Please arrange a well-maintained vehicle to bring the artistes from their
+                        place of stay to the venue, and to drop them back.</li>
+                    <li>Senior students and/or faculty should escort the artistes.</li>
+                    <li>Kindly ensure the artistes reach the venue one hour before the scheduled start.</li>
+                </ul>
+
+                <h3>Green Room</h3>
+                <ul>
+                    <li>A clean, private green room near the auditorium, preferably with an attached
+                        toilet and curtained windows.</li>
+                    <li>Floor seating (darees or carpets covered with white sheets), plus a table and
+                        three or four chairs to the side.</li>
+                    <li>Drinking water and glasses. The room should be lockable so instruments can be
+                        left safely.</li>
+                </ul>
+
+                <h3>Stage &amp; Sound</h3>
+                <ul>
+                    <li>An appropriate stage, with no cloth or carpet covering it. It may be decorated
+                        with flowers, rangoli and diyas.</li>
+                    <li>Only the SPIC MACAY third-eye logo on the backdrop — no other banners or
+                        posters on stage or in the auditorium.</li>
+                    <li>Sound system provided by the institution. Typical requirement: tabla 1 mike,
+                        vocal and harmonium 2 mikes, sitar 1 mike, announcements 2 stand mikes,
+                        dance 2 high-quality foot mikes. Full, normal stage lighting and four bottles
+                        of mineral water.</li>
+                    <li>Baithak-style seating in a closed auditorium is ideal, with students seated
+                        close to the artistes.</li>
+                </ul>
+
+                <h3>During the Programme</h3>
+                <ul>
+                    <li>Starting on time is crucial. The programme may open with lamp lighting by the
+                        head of the institution along with the artiste.</li>
+                    <li>The compere should have the artiste's bio-data, reconfirmed with them
+                        beforehand, and should check the correct sequence for introducing and
+                        felicitating the artistes.</li>
+                    <li>Mobile phones switched off, minimal movement, and no flash photography. Any
+                        photography or video needs the artistes' prior consent.</li>
+                    <li>A 15-minute interactive question-and-answer session closes the programme,
+                        followed by felicitation of all artistes and a vote of thanks.</li>
+                </ul>
+
+                <h3>Hospitality &amp; Acknowledgement</h3>
+                <ul>
+                    <li>Light refreshments before and/or after the concert, and breakfast or lunch for
+                        the artistes as appropriate. Students serving the artistes themselves adds a
+                        lovely touch.</li>
+                    <li>Bottled water and glasses on or near the stage during the programme.</li>
+                    <li>Afterwards, a Letter of Acknowledgement on institution letterhead, signed by
+                        the head of the institution, to be handed to the SPIC MACAY volunteer.</li>
+                </ul>
+            </div>
+
+            {attach_note}
+
+            <p>Please do reach out if anything above needs discussion — we are glad to help.</p>
+
+            <p style="margin-top: 22px;">
+                Warm regards,<br>
+                <strong>{coordinator_name}</strong><br>
+                SPIC MACAY{f' {chapter}' if chapter else ''}
+            </p>
+        """
+
+        try:
+            msg = MIMEMultipart('mixed')
+            msg['Subject'] = (f"SPIC MACAY Programme Confirmation & Pre-Event Guidelines — "
+                              f"{institution}")
+            msg['From'] = self.smtp_config['from_email']
+            msg['To'] = ', '.join(recipients)
+            cc_list = self._outbound_cc(recipients, *(cc_recipients or []))
+            if cc_list:
+                msg['Cc'] = ', '.join(cc_list)
+            msg.attach(MIMEText(
+                self._shell('Programme Confirmation &amp; Pre-Event Guidelines', inner), 'html'
+            ))
+
+            if guidelines_pdf_bytes:
+                try:
+                    part = MIMEBase('application', 'pdf')
+                    part.set_payload(guidelines_pdf_bytes)
+                    encoders.encode_base64(part)
+                    part.add_header('Content-Disposition', 'attachment',
+                                    filename='SPIC_MACAY_Event_Guidelines.pdf')
+                    msg.attach(part)
+                except Exception as e:
+                    logger.warning(f"Failed to attach guidelines PDF: {e}")
+
+            return self._deliver(msg, list(recipients) + cc_list, "pre-event guidelines")
+        except Exception as e:
+            logger.error(f"Failed to build pre-event guidelines email: {e}", exc_info=True)
+            return False
+
+    def send_artist_apr_acknowledgement(self, event_data: dict, recipients: list) -> bool:
+        """
+        Thank the artist once their APR has been raised. Deliberately warm rather than
+        administrative — the finance-facing detail belongs in the coordinator's copy.
+        """
+        if not self.enabled:
+            logger.info("Email notifications disabled, skipping artist acknowledgement")
+            return False
+
+        artist_name = event_data.get('artist_name') or 'Artist'
+        coordinator_name = event_data.get('coordinator_name') or 'SPIC MACAY Team'
+        chapter = event_data.get('chapter') or ''
+        institution = event_data.get('institution_name') or 'the host institution'
+
+        feedback_url = (self.smtp_config.get('feedback_form_url') or '').strip()
+        feedback_block = f"""
+            <p>If you have a few minutes, we would love to hear how the session went from your side —
+               your observations genuinely shape how we plan future programmes:<br>
+               <a href="{feedback_url}" style="color:#B3161C; font-weight:700;">Share your feedback</a></p>
+        """ if feedback_url else """
+            <p>If you have a few minutes, we would love to hear how the session went from your side —
+               simply reply to this email with your thoughts.</p>
+        """
+
+        inner = f"""
+            <p>Dear {artist_name},</p>
+            <span class="pill">🙏 With Gratitude</span>
+            <p>Thank you for performing for SPIC MACAY at {institution}. Sharing your art with
+               students is what this movement exists for, and we are grateful you gave your time
+               and music to them.</p>
+
+            <div class="facts">
+                <table>
+                    <tr><td class="label">Programme</td><td>{event_data.get('module_name') or 'Programme'}</td></tr>
+                    <tr><td class="label">Institution</td><td>{institution}</td></tr>
+                    <tr><td class="label">Date</td><td>{self._fmt_date(event_data.get('event_date'))}</td></tr>
+                    <tr><td class="label">Reference No.</td><td>{event_data.get('request_id') or 'N/A'}</td></tr>
+                </table>
+            </div>
+
+            <p>Your payment request has been raised with our office and is now being processed.
+               We will write to you again as soon as the payment has been released — there is
+               nothing you need to do in the meantime.</p>
+
+            {feedback_block}
+
+            <p>We hope to have the pleasure of hosting you again soon.</p>
+
+            <p style="margin-top: 22px;">
+                Warm regards,<br>
+                <strong>{coordinator_name}</strong><br>
+                SPIC MACAY{f' {chapter}' if chapter else ''}
+            </p>
+        """
+
+        try:
+            msg = MIMEMultipart('mixed')
+            msg['Subject'] = "Thank You for Your Programme — SPIC MACAY"
+            msg['From'] = self.smtp_config['from_email']
+            msg['To'] = ', '.join(recipients)
+            cc_list = self._outbound_cc(recipients, event_data.get('coordinator_email'))
+            if cc_list:
+                msg['Cc'] = ', '.join(cc_list)
+            msg.attach(MIMEText(self._shell('Thank You for Your Programme', inner), 'html'))
+            return self._deliver(msg, recipients + cc_list, "artist APR acknowledgement")
+        except Exception as e:
+            logger.error(f"Failed to build artist acknowledgement email: {e}", exc_info=True)
+            return False
+
+    def send_payment_completed_artist(self, payment_data: dict, recipients: list) -> bool:
+        """Tell the artist their payment has been released."""
+        if not self.enabled:
+            logger.info("Email notifications disabled, skipping artist payment confirmation")
+            return False
+
+        artist_name = payment_data.get('artist_name') or 'Artist'
+        institution = payment_data.get('institution_name') or 'the host institution'
+
+        detail_rows = ''
+        method = str(payment_data.get('payment_method') or '').strip()
+        if method and method.lower() not in ('none', 'null'):
+            detail_rows += f'<tr><td class="label">Mode</td><td>{method}</td></tr>'
+        txn = str(payment_data.get('txn_id') or '').strip()
+        if txn and txn.lower() not in ('none', 'null'):
+            detail_rows += f'<tr><td class="label">Reference</td><td>{txn}</td></tr>'
+
+        inner = f"""
+            <p>Dear {artist_name},</p>
+            <span class="pill">✅ Payment Released</span>
+            <p>We are happy to let you know that the payment for your programme has been
+               released by our office.</p>
+
+            <div class="amount-box">
+                <div class="label">Amount Released</div>
+                <div class="value">{self._fmt_amount(payment_data.get('artist_payment'))}</div>
+            </div>
+
+            <div class="facts">
+                <table>
+                    <tr><td class="label">Programme</td><td>{payment_data.get('module_name') or 'Programme'}</td></tr>
+                    <tr><td class="label">Institution</td><td>{institution}</td></tr>
+                    <tr><td class="label">Programme Date</td><td>{self._fmt_date(payment_data.get('start_date'))}</td></tr>
+                    <tr><td class="label">Released On</td><td>{self._fmt_date(payment_data.get('paid_on'))}</td></tr>
+                    {detail_rows}
+                </table>
+            </div>
+
+            <p>Depending on your bank, the credit may take a couple of working days to appear.
+               If you do not see it after that, please do write to us and we will follow it up.</p>
+
+            <p>Thank you once again for sharing your art with our students.</p>
+
+            <p style="margin-top: 22px;">
+                Warm regards,<br>
+                <strong>SPIC MACAY</strong>
+            </p>
+        """
+
+        try:
+            msg = MIMEMultipart('mixed')
+            msg['Subject'] = "Your SPIC MACAY Programme Payment Has Been Released"
+            msg['From'] = self.smtp_config['from_email']
+            msg['To'] = ', '.join(recipients)
+            cc_list = self._outbound_cc(recipients, payment_data.get('coordinator_email'))
+            if cc_list:
+                msg['Cc'] = ', '.join(cc_list)
+            msg.attach(MIMEText(self._shell('Payment Released', inner), 'html'))
+            return self._deliver(msg, recipients + cc_list, "artist payment confirmation")
+        except Exception as e:
+            logger.error(f"Failed to build artist payment confirmation: {e}", exc_info=True)
+            return False
+
+    def send_payment_completed_coordinator(self, payment_data: dict, recipients: list) -> bool:
+        """
+        Confirm to the coordinator who filed the APR that finance has settled it — closing
+        the loop on something they would otherwise keep chasing.
+        """
+        if not self.enabled:
+            logger.info("Email notifications disabled, skipping coordinator payment confirmation")
+            return False
+
+        artist_name = payment_data.get('artist_name') or 'the artist'
+        institution = payment_data.get('institution_name') or 'the host institution'
+        artist_note = (
+            'The artist has been informed directly as well.'
+            if payment_data.get('artist_notified')
+            else 'We do not have an email address on file for this artist, so they have not been '
+                 'notified directly — you may wish to let them know.'
+        )
+
+        inner = f"""
+            <p>Dear {payment_data.get('coordinator_name') or 'Coordinator'},</p>
+            <span class="pill">✅ Settled by Finance</span>
+            <p>The artist payment for the programme below has been completed by the finance team.
+               No further follow-up is needed from your side.</p>
+
+            <div class="amount-box">
+                <div class="label">Amount Paid to Artist</div>
+                <div class="value">{self._fmt_amount(payment_data.get('artist_payment'))}</div>
+            </div>
+
+            <div class="facts">
+                <table>
+                    <tr><td class="label">Artist</td><td>{artist_name}</td></tr>
+                    <tr><td class="label">Programme</td><td>{payment_data.get('module_name') or 'Programme'}</td></tr>
+                    <tr><td class="label">Institution</td><td>{institution}</td></tr>
+                    <tr><td class="label">Programme Date</td><td>{self._fmt_date(payment_data.get('start_date'))}</td></tr>
+                    <tr><td class="label">Paid On</td><td>{self._fmt_date(payment_data.get('paid_on'))}</td></tr>
+                    <tr><td class="label">Reference No.</td><td>{payment_data.get('request_id') or 'N/A'}</td></tr>
+                </table>
+            </div>
+
+            <p>{artist_note}</p>
+
+            <p style="margin-top: 22px;">
+                Warm regards,<br>
+                <strong>SPIC MACAY Supatra Platform</strong>
+            </p>
+        """
+
+        try:
+            msg = MIMEMultipart('mixed')
+            msg['Subject'] = f"Artist Payment Completed — {artist_name} ({institution})"
+            msg['From'] = self.smtp_config['from_email']
+            msg['To'] = ', '.join(recipients)
+            # Central team is copied here too, so the office sees the loop closed even
+            # though this one is addressed to the coordinator rather than outward
+            cc_list = self._outbound_cc(recipients)
+            if cc_list:
+                msg['Cc'] = ', '.join(cc_list)
+            msg.attach(MIMEText(self._shell('Artist Payment Completed', inner), 'html'))
+            return self._deliver(msg, recipients + cc_list, "coordinator payment confirmation")
+        except Exception as e:
+            logger.error(f"Failed to build coordinator payment confirmation: {e}", exc_info=True)
+            return False

@@ -22,10 +22,10 @@ wheels/
 *.egg
 
 # Virtual Environment
-venv/
-env/
-ENV/
-.venv
+#venv/
+#env/
+#ENV/
+#.venv
 
 # IDE
 .vscode/
@@ -63,3 +63,4 @@ temp/
 
 # Google credentials (never commit)
 credentials/
+*.sql 

@@ -63,4 +63,9 @@ temp/
 
 # Google credentials (never commit)
 credentials/
-*.sql 
+
+# APR Assistant v2 runtime data (governance database, generated documents, dry-run emails)
+instance/
+
+# end-to-end check results
+e2e_output/

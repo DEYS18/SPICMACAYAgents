@@ -40,16 +40,26 @@ _BRAND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 _ARTIST_PHOTO_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                  'static', 'artist_photos')
 
-# Windows ships Georgia/Arial, so nothing needs bundling on the deployment target.
-# Elsewhere these paths simply miss and Pillow's default font is used.
-_FONTS_DIR = r'C:\Windows\Fonts'
-_FONT_PATHS = {
-    'bold_serif':   os.path.join(_FONTS_DIR, 'georgiab.ttf'),
-    'serif':        os.path.join(_FONTS_DIR, 'georgia.ttf'),
-    'italic_serif': os.path.join(_FONTS_DIR, 'georgiai.ttf'),
-    'bold_sans':    os.path.join(_FONTS_DIR, 'arialbd.ttf'),
-    'sans':         os.path.join(_FONTS_DIR, 'arial.ttf'),
+# Georgia/Arial on Windows; the bundled DejaVu fonts (app/static/fonts) everywhere else, so
+# posters render properly on a Linux server too (previously they fell back to a tiny bitmap font).
+_FONT_DIRS = [os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static', 'fonts'),
+              r'C:\Windows\Fonts', '/usr/share/fonts/truetype/dejavu', '/usr/share/fonts/truetype/liberation',
+              '/usr/share/fonts/TTF', '/Library/Fonts', '/System/Library/Fonts/Supplemental']
+_FONT_CANDIDATES = {
+    'bold_serif': ['georgiab.ttf', 'Georgia Bold.ttf', 'DejaVuSerif-Bold.ttf', 'LiberationSerif-Bold.ttf'],
+    'serif': ['georgia.ttf', 'Georgia.ttf', 'DejaVuSerif.ttf', 'LiberationSerif-Regular.ttf'],
+    'italic_serif': ['georgiai.ttf', 'Georgia Italic.ttf', 'DejaVuSerif-Italic.ttf', 'LiberationSerif-Italic.ttf'],
+    'bold_sans': ['arialbd.ttf', 'Arial Bold.ttf', 'DejaVuSans-Bold.ttf', 'LiberationSans-Bold.ttf'],
+    'sans': ['arial.ttf', 'Arial.ttf', 'DejaVuSans.ttf', 'LiberationSans-Regular.ttf'],
 }
+
+
+def _resolve_fonts():
+    return {kind: next((os.path.join(d, n) for n in names for d in _FONT_DIRS if os.path.exists(os.path.join(d, n))), names[0])
+            for kind, names in _FONT_CANDIDATES.items()}
+
+
+_FONT_PATHS = _resolve_fonts()
 
 _TAGLINE = 'Society for the Promotion of Indian Classical Music And Culture Amongst Youth'
 _FOOTER_TAGLINE = ('Have every child experience the inspiration and mysticism in '
@@ -308,7 +318,7 @@ def _draw_footer(draw, chapter: str, contact: str):
     band_y0 = _H - 108
     draw.rectangle([18, band_y0, _W - 19, band_y0 + band_h], fill=_RED_DARK)
 
-    contact_line = contact.strip() if contact else 'For more info visit us at www.spicmacay.org'
+    contact_line = contact.strip() if contact else _INFO_LINE
     _centered(draw, _W // 2, band_y0 + 8, contact_line, _font('bold_sans', 21), _WHITE)
     _centered(draw, _W // 2, band_y0 + 33,
               f'SPIC MACAY{" " + chapter if chapter else ""}  •  www.spicmacay.org',
@@ -411,7 +421,11 @@ def generate_program_poster(program_data: dict) -> bytes:
         img = _background()
         draw = ImageDraw.Draw(img)
 
-        presenter = f'{chapter or institution_name} PRESENTS'
+        try:
+            presenter = _PRESENTER_TEMPLATE.format(chapter_or_institution=chapter or institution_name,
+                                                   chapter=chapter, institution=institution_name)
+        except (KeyError, IndexError, ValueError):
+            presenter = f'{chapter or institution_name} PRESENTS'
         y = _draw_header(img, draw, presenter)
 
         # Programme title — the module, e.g. "Hindustani Vocal Recital"
@@ -552,3 +566,24 @@ def save_poster(poster_bytes: bytes, event_id) -> str:
     except Exception as e:
         logger.error(f"Failed to save generated poster: {e}", exc_info=True)
         return ''
+
+
+# ── Governed wording (Admin > Templates > Poster wording and options) ─────────
+_INFO_LINE = 'For more info visit us at www.spicmacay.org'
+_PRESENTER_TEMPLATE = '{chapter_or_institution} PRESENTS'
+
+
+def generate_with_style(program_data: dict, style: dict = None) -> bytes:
+    """generate_program_poster() with administrator-governed wording. Callers serialise access
+    (the module-level wording is swapped in and restored around the call)."""
+    global _TAGLINE, _FOOTER_TAGLINE, _INFO_LINE, _PRESENTER_TEMPLATE
+    style = style or {}
+    saved = (_TAGLINE, _FOOTER_TAGLINE, _INFO_LINE, _PRESENTER_TEMPLATE)
+    try:
+        _TAGLINE = style.get('tagline') or _TAGLINE
+        _FOOTER_TAGLINE = style.get('footer_tagline') or _FOOTER_TAGLINE
+        _INFO_LINE = style.get('info_line') or _INFO_LINE
+        _PRESENTER_TEMPLATE = style.get('presenter_template') or _PRESENTER_TEMPLATE
+        return generate_program_poster(program_data)
+    finally:
+        _TAGLINE, _FOOTER_TAGLINE, _INFO_LINE, _PRESENTER_TEMPLATE = saved

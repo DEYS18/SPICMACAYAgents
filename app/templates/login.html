@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{ 'Admin sign-in' if mode == 'admin' else 'Sign in' }} | SPIC MACAY APR Assistant</title>
+<link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;600&family=Tiro+Devanagari+Hindi&display=swap" rel="stylesheet" media="print" onload="this.media=\'all\'">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/assistant.css') }}">
+</head>
+<body class="login-page" data-base="{{ request.script_root }}">
+<main class="login">
+  <img class="login-logo" src="{{ url_for('static', filename='img/brand/spicmacay_wordmark.png') }}" alt="SPIC MACAY">
+  {% if mode == 'admin' %}
+    <h1>Admin console</h1>
+    {% if admin_password %}
+      <p>Enter the administrator password.</p>
+      <form id="admin-form"><label>Password<input type="password" id="admin-pw" autocomplete="current-password" required></label>
+      <button class="btn primary" type="submit">Open the admin console</button></form>
+    {% endif %}
+    <p class="muted">{% if auth_mode == 'email_otp' %}Administrators can also <a href="{{ url_for('auth.login', next=next) }}">sign in with their email</a>.{% elif not admin_password %}Set ADMIN_PASSWORD or ADMIN_EMAILS on the server to enable the admin console.{% endif %}</p>
+  {% else %}
+    <h1>Sign in</h1>
+    {% if auth_mode == 'open' %}<p class="muted">Signing in is optional on this server: <a href="{{ next }}">continue to the assistant</a>. Signed-in coordinators are recognised automatically on every program.</p>{% endif %}
+    <form id="code-form"><label>Your coordinator email<input type="email" id="email" autocomplete="email" required></label>
+      <button class="btn primary" type="submit">Email me a sign-in code</button></form>
+    <form id="verify-form" hidden><label>The 6-digit code from the email<input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label>
+      <button class="btn primary" type="submit">Sign in</button></form>
+  {% endif %}
+  <p id="login-msg" class="login-msg" role="status"></p>
+</main>
+<script>
+(() => {
+  const base = document.body.dataset.base || '', msg = document.getElementById('login-msg'), next = {{ next|tojson }};
+  const post = (url, body) => fetch(base + url, {method: 'POST', headers: {'Content-Type': 'application/json'}, credentials: 'same-origin', body: JSON.stringify(body)}).then(async r => ({ok: r.ok, data: await r.json().catch(() => ({}))}));
+  const af = document.getElementById('admin-form');
+  if (af) af.addEventListener('submit', async e => { e.preventDefault(); const r = await post('/admin/login', {password: document.getElementById('admin-pw').value}); if (r.ok) location.href = base + '/admin'; else msg.textContent = r.data.error || 'Sign-in failed.'; });
+  const cf = document.getElementById('code-form'), vf = document.getElementById('verify-form');
+  if (cf) cf.addEventListener('submit', async e => { e.preventDefault(); msg.textContent = 'Sending...'; const r = await post('/api/auth/request-code', {email: document.getElementById('email').value});
+    if (!r.ok) { msg.textContent = r.data.error || 'Could not send the code.'; return; }
+    cf.hidden = true; vf.hidden = false; document.getElementById('code').focus();
+    msg.textContent = r.data.dev_code ? 'Development mode, your code is ' + r.data.dev_code : 'Check your inbox for the code.'; });
+  if (vf) vf.addEventListener('submit', async e => { e.preventDefault(); const r = await post('/api/auth/verify', {email: document.getElementById('email').value, code: document.getElementById('code').value});
+    if (r.ok) location.href = next || (base + '/assistant'); else msg.textContent = r.data.error || 'Sign-in failed.'; });
+})();
+</script>
+</body>
+</html>

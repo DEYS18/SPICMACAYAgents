@@ -4,7 +4,10 @@ Flask Application Factory for SPIC MACAY Event Agent
 Integrated with Multi-Agent System
 """
 from flask import Flask, render_template
-from flask_cors import CORS
+try:
+    from flask_cors import CORS
+except ImportError:  # optional — only needed when ALLOWED_ORIGINS is set
+    CORS = None
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 import os
@@ -161,10 +164,12 @@ def create_app(config=None):
     
     # Validate OpenAI API key
     if not app.config['OPENAI_API_KEY']:
-        raise ValueError("OPENAI_API_KEY environment variable is required")
+        app.logger.warning("OPENAI_API_KEY is not set: AI chat, voice and image reading are disabled.")
     
     # Enable CORS
-    CORS(app, origins=os.getenv('ALLOWED_ORIGINS', '*').split(','))
+    # Same-origin by default; cross-origin access only when explicitly configured
+    if CORS and os.getenv('ALLOWED_ORIGINS'):
+        CORS(app, origins=os.getenv('ALLOWED_ORIGINS').split(','))
     
     # ========================================
     # STEP 2: Setup Logging
@@ -325,7 +330,7 @@ def create_app(config=None):
     except Exception as e:
         app.logger.error(f"AI Agent System initialization failed: {e}")
         app.logger.error(f"Full traceback: {traceback.format_exc()}")
-        raise Exception("Failed to initialize AI Agent System") from e
+        app.logger.warning("Classic assistant unavailable; the new assistant still works.")
     
     # ========================================
     # STEP 5b: Initialize Knowledge (RAG) Agents  [Added by Claude]
@@ -369,6 +374,24 @@ def create_app(config=None):
     # ========================================
     register_error_handlers(app)
     
+    # GPT-5.x / GPT-6 compatibility for every Chat Completions call in the app (classic assistant, guides)
+    try:
+        from app.agents.llm import install_compat_shim
+        if install_compat_shim():
+            app.logger.info("  OpenAI compatibility layer active (reasoning models)")
+    except Exception as e:
+        app.logger.warning(f"OpenAI compatibility layer not installed: {e}")
+
+    # ========================================
+    # STEP 8: APR Assistant v2 (skills, governance, admin console)
+    # ========================================
+    try:
+        from app.assistant_setup import init_assistant
+        init_assistant(app)
+        app.logger.info("  APR Assistant v2 ready at /assistant; admin console at /admin")
+    except Exception as e:
+        app.logger.error(f"APR Assistant v2 failed to start: {e}\n{traceback.format_exc()}")
+
     app.logger.info("=" * 60)
     app.logger.info("Application initialization complete!")
     app.logger.info("Available Components:")
@@ -513,10 +536,10 @@ def register_routes(app):
         """Landing page with cards for each agent  [Added by Claude]"""
         return render_template('index.html')
 
-    @app.route('/assistant')
-    def assistant():
-        """Original event/voice assistant chat  [Added by Claude]"""
-        return render_template('assistant.html')
+    @app.route('/assistant/classic')
+    def assistant_classic():
+        """The previous assistant, kept for comparison and fallback."""
+        return render_template('assistant_classic.html')
 
     @app.route('/guide/<agent_key>')
     def guide(agent_key):

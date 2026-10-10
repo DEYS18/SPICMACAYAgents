@@ -55,7 +55,7 @@ def transcribe_audio():
             }), 400
         
         # Get language parameter (optional)
-        language = request.form.get('language', 'en')
+        language = request.form.get('language') or None  # auto-detect unless the user picked one
         
         # Save temporary file
         filename = secure_filename(audio_file.filename)

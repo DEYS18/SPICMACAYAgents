@@ -187,7 +187,7 @@ class EventService:
                 event_date,
                 event_data.get('end_date', event_date),
                 event_data.get('event_time', '18:00'),
-                event_data.get('module_name', 'Lecture Demonstration'),
+                self._module_value(event_data.get('module_name', 'Lecture Demonstration')),
                 event_data.get('state', ''),
                 event_data.get('city', ''),
                 str(event_data.get('institution_id', '')),
@@ -436,7 +436,7 @@ class EventService:
                 artist_data.get('bank_name') or None,
                 artist_data.get('account_number') or None,
                 artist_data.get('ifsc_code') or None,
-                'AI',
+                (artist_data.get('added_by') or 'AI')[:10],
                 current_date,
                 default_password_hash
             )
@@ -660,8 +660,9 @@ class EventService:
                     apr.request_id,
                     apr.custom_apr
                 FROM event_list e
+                LEFT JOIN event_module em ON CAST(em.tid AS CHAR) = e.event_category
                 LEFT JOIN artists_list a ON e.artist = a.tid
-                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN (SELECT institution_name, city, MIN(sid) AS sid FROM institution_list GROUP BY institution_name, city) inst_c ON inst_c.institution_name = e.institution AND inst_c.city = e.city LEFT JOIN (SELECT institution_name, MIN(sid) AS sid FROM institution_list GROUP BY institution_name) inst_n ON inst_n.institution_name = e.institution LEFT JOIN institution_list i ON i.sid = COALESCE(CASE WHEN e.institution REGEXP '^[0-9]+$' THEN e.institution END, inst_c.sid, inst_n.sid)
                 LEFT JOIN apr_payment_request apr ON apr.event_id = e.id
                 WHERE e.id = %s
             """
@@ -682,8 +683,9 @@ class EventService:
                     i.institution_name, i.email as institution_email,
                     apr.request_id as apr_request_id
                 FROM event_list e
+                LEFT JOIN event_module em ON CAST(em.tid AS CHAR) = e.event_category
                 LEFT JOIN artists_list a ON e.artist = a.tid
-                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN (SELECT institution_name, city, MIN(sid) AS sid FROM institution_list GROUP BY institution_name, city) inst_c ON inst_c.institution_name = e.institution AND inst_c.city = e.city LEFT JOIN (SELECT institution_name, MIN(sid) AS sid FROM institution_list GROUP BY institution_name) inst_n ON inst_n.institution_name = e.institution LEFT JOIN institution_list i ON i.sid = COALESCE(CASE WHEN e.institution REGEXP '^[0-9]+$' THEN e.institution END, inst_c.sid, inst_n.sid)
                 LEFT JOIN apr_payment_request apr ON apr.event_id = e.id
                 WHERE e.status = 1
             """
@@ -733,7 +735,7 @@ class EventService:
             query = """
                 SELECT
                     e.id, e.title, e.start_date, e.event_status, e.budget,
-                    e.event_category AS module_name,
+                    COALESCE(em.name, e.event_category) AS module_name,
                     a.name AS artist_name,
                     i.sid AS institution_id, i.institution_name,
                     i.email AS institution_email, i.city AS institution_city,
@@ -741,8 +743,9 @@ class EventService:
                     i.name_of_the_coordinator AS institution_coordinator,
                     apr.chapter, apr.request_id, apr.custom_apr
                 FROM event_list e
+                LEFT JOIN event_module em ON CAST(em.tid AS CHAR) = e.event_category
                 LEFT JOIN artists_list a ON e.artist = a.tid
-                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN (SELECT institution_name, city, MIN(sid) AS sid FROM institution_list GROUP BY institution_name, city) inst_c ON inst_c.institution_name = e.institution AND inst_c.city = e.city LEFT JOIN (SELECT institution_name, MIN(sid) AS sid FROM institution_list GROUP BY institution_name) inst_n ON inst_n.institution_name = e.institution LEFT JOIN institution_list i ON i.sid = COALESCE(CASE WHEN e.institution REGEXP '^[0-9]+$' THEN e.institution END, inst_c.sid, inst_n.sid)
                 LEFT JOIN apr_payment_request apr ON apr.event_id = e.id
                 LEFT JOIN apr_event_receipt r
                     ON r.event_id = e.id AND r.type_of_receipt = 'contribution'
@@ -786,7 +789,7 @@ class EventService:
             query = """
                 SELECT
                     e.id, e.title, e.start_date, e.event_status, e.budget, e.image,
-                    e.event_category AS module_name, e.accompanying_artist,
+                    COALESCE(em.name, e.event_category) AS module_name, e.accompanying_artist,
                     a.name AS artist_name,
                     i.sid AS institution_id, i.institution_name,
                     i.email AS institution_email, i.city AS institution_city,
@@ -794,8 +797,9 @@ class EventService:
                     i.name_of_the_coordinator AS institution_coordinator,
                     apr.chapter, apr.request_id, apr.custom_apr
                 FROM event_list e
+                LEFT JOIN event_module em ON CAST(em.tid AS CHAR) = e.event_category
                 LEFT JOIN artists_list a ON e.artist = a.tid
-                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN (SELECT institution_name, city, MIN(sid) AS sid FROM institution_list GROUP BY institution_name, city) inst_c ON inst_c.institution_name = e.institution AND inst_c.city = e.city LEFT JOIN (SELECT institution_name, MIN(sid) AS sid FROM institution_list GROUP BY institution_name) inst_n ON inst_n.institution_name = e.institution LEFT JOIN institution_list i ON i.sid = COALESCE(CASE WHEN e.institution REGEXP '^[0-9]+$' THEN e.institution END, inst_c.sid, inst_n.sid)
                 LEFT JOIN apr_payment_request apr ON apr.event_id = e.id
                 WHERE e.id = %s AND e.status = 1
             """
@@ -913,14 +917,15 @@ class EventService:
             query = """
                 SELECT
                     e.id, e.title, e.start_date, e.event_time, e.venue, e.city, e.state,
-                    e.event_category AS module_name, e.accompanying_artist,
+                    COALESCE(em.name, e.event_category) AS module_name, e.accompanying_artist,
                     a.name AS artist_name, a.art_form,
                     i.institution_name, i.email AS institution_email,
                     i.name_of_the_coordinator AS institution_coordinator,
                     apr.chapter
                 FROM event_list e
+                LEFT JOIN event_module em ON CAST(em.tid AS CHAR) = e.event_category
                 LEFT JOIN artists_list a ON e.artist = a.tid
-                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN (SELECT institution_name, city, MIN(sid) AS sid FROM institution_list GROUP BY institution_name, city) inst_c ON inst_c.institution_name = e.institution AND inst_c.city = e.city LEFT JOIN (SELECT institution_name, MIN(sid) AS sid FROM institution_list GROUP BY institution_name) inst_n ON inst_n.institution_name = e.institution LEFT JOIN institution_list i ON i.sid = COALESCE(CASE WHEN e.institution REGEXP '^[0-9]+$' THEN e.institution END, inst_c.sid, inst_n.sid)
                 LEFT JOIN apr_payment_request apr ON apr.event_id = e.id
                 WHERE e.id = %s AND e.status = 1
             """
@@ -1018,14 +1023,15 @@ class EventService:
             query = """
                 SELECT
                     e.id, e.title, e.image, e.start_date, e.event_time,
-                    e.event_category AS module_name, e.city, e.state, e.venue, e.attendees,
+                    COALESCE(em.name, e.event_category) AS module_name, e.city, e.state, e.venue, e.attendees,
                     e.accompanying_artist, e.added_by AS coordinator_name,
                     a.name AS artist_name, a.art_form,
                     i.institution_name,
                     apr.request_id, apr.custom_apr, apr.chapter
                 FROM event_list e
+                LEFT JOIN event_module em ON CAST(em.tid AS CHAR) = e.event_category
                 LEFT JOIN artists_list a ON e.artist = a.tid
-                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN (SELECT institution_name, city, MIN(sid) AS sid FROM institution_list GROUP BY institution_name, city) inst_c ON inst_c.institution_name = e.institution AND inst_c.city = e.city LEFT JOIN (SELECT institution_name, MIN(sid) AS sid FROM institution_list GROUP BY institution_name) inst_n ON inst_n.institution_name = e.institution LEFT JOIN institution_list i ON i.sid = COALESCE(CASE WHEN e.institution REGEXP '^[0-9]+$' THEN e.institution END, inst_c.sid, inst_n.sid)
                 LEFT JOIN apr_payment_request apr ON apr.event_id = e.id
                 WHERE e.id = %s AND e.status = 1
             """
@@ -1130,7 +1136,7 @@ class EventService:
             p.custom_apr,
             e.title,
             e.start_date,
-            e.event_category AS module_name,
+            COALESCE(em.name, e.event_category) AS module_name,
             e.venue,
             e.city,
             e.state,
@@ -1143,8 +1149,9 @@ class EventService:
             apr.created_by  AS apr_created_by
         FROM payment_artist_detail p
         LEFT JOIN event_list        e   ON e.id  = p.event_id
+        LEFT JOIN event_module      em  ON CAST(em.tid AS CHAR) = e.event_category
         LEFT JOIN artists_list      a   ON a.tid = p.artist_id
-        LEFT JOIN institution_list  i   ON i.sid = e.institution
+        LEFT JOIN (SELECT institution_name, city, MIN(sid) AS sid FROM institution_list GROUP BY institution_name, city) inst_c ON inst_c.institution_name = e.institution AND inst_c.city = e.city LEFT JOIN (SELECT institution_name, MIN(sid) AS sid FROM institution_list GROUP BY institution_name) inst_n ON inst_n.institution_name = e.institution LEFT JOIN institution_list i ON i.sid = COALESCE(CASE WHEN e.institution REGEXP '^[0-9]+$' THEN e.institution END, inst_c.sid, inst_n.sid)
         LEFT JOIN apr_payment_request apr ON apr.event_id = p.event_id
         WHERE p.artist_payment IS NOT NULL
           AND p.artist_payment > 0
@@ -1413,8 +1420,9 @@ class EventService:
             recent_query = """
                 SELECT e.*, a.name as artist_name, i.institution_name
                 FROM event_list e
+                LEFT JOIN event_module em ON CAST(em.tid AS CHAR) = e.event_category
                 LEFT JOIN artists_list a ON e.artist = a.tid
-                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN (SELECT institution_name, city, MIN(sid) AS sid FROM institution_list GROUP BY institution_name, city) inst_c ON inst_c.institution_name = e.institution AND inst_c.city = e.city LEFT JOIN (SELECT institution_name, MIN(sid) AS sid FROM institution_list GROUP BY institution_name) inst_n ON inst_n.institution_name = e.institution LEFT JOIN institution_list i ON i.sid = COALESCE(CASE WHEN e.institution REGEXP '^[0-9]+$' THEN e.institution END, inst_c.sid, inst_n.sid)
                 WHERE e.status = 1
                 ORDER BY e.added_date DESC
                 LIMIT 10
@@ -1447,11 +1455,12 @@ class EventService:
             query = """
                 SELECT
                     e.id, e.title, e.start_date, e.added_date, e.event_status,
-                    e.event_category AS module_name, e.city, e.state,
+                    COALESCE(em.name, e.event_category) AS module_name, e.city, e.state,
                     a.name AS artist_name, i.institution_name
                 FROM event_list e
+                LEFT JOIN event_module em ON CAST(em.tid AS CHAR) = e.event_category
                 LEFT JOIN artists_list a ON e.artist = a.tid
-                LEFT JOIN institution_list i ON e.institution = i.sid
+                LEFT JOIN (SELECT institution_name, city, MIN(sid) AS sid FROM institution_list GROUP BY institution_name, city) inst_c ON inst_c.institution_name = e.institution AND inst_c.city = e.city LEFT JOIN (SELECT institution_name, MIN(sid) AS sid FROM institution_list GROUP BY institution_name) inst_n ON inst_n.institution_name = e.institution LEFT JOIN institution_list i ON i.sid = COALESCE(CASE WHEN e.institution REGEXP '^[0-9]+$' THEN e.institution END, inst_c.sid, inst_n.sid)
                 WHERE e.status = 1 AND e.added_date >= (CURDATE() - INTERVAL 7 DAY)
                 ORDER BY e.added_date DESC, e.id DESC
             """
@@ -1576,3 +1585,36 @@ class EventService:
         except Exception as e:
             logger.error(f"Error updating event photos: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
+
+    # ── Added for the APR Assistant v2 ───────────────────────────────────────
+    def _module_value(self, name):
+        """The portal stores event_list.event_category as the event_module id (tid)."""
+        if not name or str(name).isdigit():
+            return name
+        try:
+            if not hasattr(self, '_module_cache'):
+                rows = self.db.fetch_all('SELECT tid, name FROM event_module WHERE status = 1') or []
+                self._module_cache = {(r['name'] or '').strip().lower(): str(r['tid']) for r in rows}
+            return self._module_cache.get(str(name).strip().lower(), name)
+        except Exception:
+            return name
+
+    def update_institution_bank_details(self, institution_id, bank_data: dict) -> dict:
+        res = self.db.execute_query(
+            "UPDATE institution_list SET bank_name = %s, account_number = %s, enter_ifsc_code = %s WHERE sid = %s",
+            (bank_data.get('bank_name') or None, bank_data.get('account_number') or None,
+             bank_data.get('ifsc_code') or None, institution_id), commit=True)
+        return {'success': bool(res and res.get('success')), 'error': (res or {}).get('error')}
+
+    def set_cancelled_cheque(self, entity: str, entity_id, rel_path: str) -> bool:
+        table, key = ('artists_list', 'tid') if entity == 'artist' else ('institution_list', 'sid')
+        res = self.db.execute_query(f"UPDATE {table} SET cancelled_cheque = %s WHERE {key} = %s", (rel_path, entity_id), commit=True)
+        return bool(res and res.get('success'))
+
+    def set_artist_status(self, artist_id, status: int, added_by: str = None) -> bool:
+        if added_by is not None:
+            res = self.db.execute_query("UPDATE artists_list SET status = %s, added_by = %s WHERE tid = %s",
+                                        (status, added_by[:10], artist_id), commit=True)
+        else:
+            res = self.db.execute_query("UPDATE artists_list SET status = %s WHERE tid = %s", (status, artist_id), commit=True)
+        return bool(res and res.get('success'))

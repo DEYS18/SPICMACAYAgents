@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Admin console | SPIC MACAY APR Assistant</title>
+<link rel="icon" href="{{ url_for('static', filename='img/spicmacay-logo.svg') }}">
+<link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;600;700&family=Tiro+Devanagari+Hindi&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/assistant.css') }}">
+<style>
+  body { background: var(--page); }
+  .admin-top { display: flex; align-items: center; gap: 14px; padding: 14px 18px 10px; padding-top: calc(14px + env(safe-area-inset-top)); }
+  .admin-top h1 { margin: 0; flex: 1; font: 400 24px/1.2 var(--head); color: var(--kumkum); }
+  .admin-top a { font-weight: 600; text-decoration: none; }
+  .tabs { display: flex; gap: 2px; overflow-x: auto; padding: 0 12px; border-bottom: 1px solid var(--line); }
+  .tabs button { border: 0; background: transparent; padding: 12px 14px; font-weight: 600; color: var(--mitti); border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
+  .tabs button[aria-selected="true"] { color: var(--kumkum); border-bottom-color: var(--sindoor); }
+  .admin-main { padding: 18px; max-width: 1320px; margin: 0 auto; }
+  .admin-main h2 { font: 400 24px/1.25 var(--head); color: var(--kumkum); margin: 4px 0 12px; }
+  .admin-main h3 { font-size: 17px; margin: 18px 0 8px; color: var(--kumkum); }
+  .lead { color: var(--mitti); margin: 0 0 14px; max-width: 72ch; }
+  .two { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 22px; align-items: start; }
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+  @media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
+  @media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+  .tpl-list h4 { margin: 14px 0 4px; font-size: 14px; color: var(--mitti); font-weight: 600; }
+  .tpl-list button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 8px 10px; border-radius: var(--r-s); cursor: pointer; }
+  .tpl-list button:hover { background: var(--kesar); }
+  .tpl-list button[aria-current="true"] { background: var(--kesar); font-weight: 600; color: var(--kumkum); }
+  .tpl-list small { display: block; color: var(--mitti); font-size: 13px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin: 8px 0; }
+  .row > label, .stack > label { display: grid; gap: 4px; font-size: 14px; color: var(--mitti); }
+  .stack { display: grid; gap: 10px; }
+  .row input:not([type=checkbox]), .row select, .stack input:not([type=checkbox]), .stack select, .stack textarea, .grow input {
+    border: 1.5px solid var(--line); border-radius: var(--r-s); padding: 8px 10px; background: var(--page); font-size: 15px; color: var(--kajal); }
+  .grow { flex: 1; min-width: 220px; }
+  .grow input { width: 100%; }
+  .check { display: inline-flex !important; grid-auto-flow: column; align-items: center; gap: 8px; color: var(--kajal) !important; font-size: 15px !important; }
+  .check input { accent-color: var(--sindoor); width: 17px; height: 17px; }
+  textarea.code { width: 100%; min-height: 360px; font: 13px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; border: 1.5px solid var(--line);
+                  border-radius: var(--r-s); padding: 10px; background: var(--panel); color: var(--kajal); tab-size: 2; }
+  textarea.short { min-height: 110px; }
+  .preview { border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; background: #fff; }
+  .preview .bar { padding: 8px 12px; background: var(--kesar); color: var(--kumkum); font-size: 14px; }
+  .preview iframe { display: block; width: 100%; height: 620px; border: 0; background: #fff; }
+  .preview img { display: block; max-width: 100%; margin: 0 auto; }
+  fieldset { border: 1px solid var(--line); border-radius: var(--r-m); padding: 10px 14px 12px; margin: 10px 0; }
+  legend { font-weight: 600; color: var(--kumkum); padding: 0 6px; }
+  table.data { width: 100%; border-collapse: collapse; font-size: 15px; }
+  table.data th, table.data td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.data th { color: var(--mitti); font-weight: 600; font-size: 14px; }
+  .cols td { padding: 4px 6px; }
+  .cols input[type=text] { width: 100%; }
+  .cols input[type=number] { width: 70px; }
+  .placeholders { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+  .placeholders button { font: 13px ui-monospace, Consolas, monospace; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 7px; cursor: pointer; color: var(--kumkum); }
+  .versions li { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .versions li span { flex: 1; color: var(--mitti); font-size: 14px; }
+  .versions { list-style: none; padding: 0; margin: 0; }
+  .status-list { list-style: none; padding: 0; margin: 0; max-width: 760px; }
+  .status-list li { display: grid; grid-template-columns: 14px 190px 1fr; gap: 10px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); }
+  .dot.off { background: var(--haldi); }
+  .count { font: 400 40px/1 var(--head); color: var(--sindoor); }
+  .muted { color: var(--mitti); }
+  input[type=color] { width: 52px; height: 38px; padding: 3px !important; cursor: pointer; }
+  .pv-open { display: inline-block; margin: 8px 12px; font-weight: 600; }
+  .err { color: var(--sindoor); font-weight: 600; }
+</style>
+</head>
+<body data-base="{{ request.script_root }}">
+<header class="admin-top">
+  <img src="{{ url_for('static', filename='img/brand/spicmacay_wordmark.png') }}" alt="SPIC MACAY" style="height:30px">
+  <h1>Admin console</h1>
+  <a href="{{ request.script_root }}/assistant">Open the assistant</a>
+  <a href="{{ request.script_root }}/logout">Sign out</a>
+</header>
+<nav class="tabs" role="tablist" aria-label="Admin sections">
+  <button role="tab" data-tab="overview">Overview</button>
+  <button role="tab" data-tab="templates">Templates</button>
+  <button role="tab" data-tab="settings">Settings</button>
+  <button role="tab" data-tab="approvals">Approvals</button>
+  <button role="tab" data-tab="flags">Directory flags</button>
+  <button role="tab" data-tab="activity">Activity</button>
+</nav>
+<main id="admin-main" class="admin-main" tabindex="-1"></main>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+</body>
+</html>

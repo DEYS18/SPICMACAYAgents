@@ -6,6 +6,7 @@ Orchestrates routing between event creation and information agents
 import os
 from openai import OpenAI
 import logging
+import traceback
 from typing import Dict, Optional
 from app.models.agent import SPICMacayAgent
 from app.models.workflow_agent import WorkflowAgent

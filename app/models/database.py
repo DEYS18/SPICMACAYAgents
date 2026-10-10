@@ -7,8 +7,42 @@ from mysql.connector import pooling, Error
 from typing import Dict, List, Optional
 import logging
 import difflib
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
+
+
+_LATIN1_TABLES = {'event_list', 'event_series', 'artists_list', 'institution_list', 'apr_payment_request',
+                  'apr_payment_request2', 'event_module', 'payment_artist_detail'}   # latin1 in production (MariaDB 10.11)
+_WRITE_RE = None
+
+
+def latin1_params(query, params):
+    """Make text latin1-safe when a statement writes to one of the portal's latin1 tables (strict mode would reject it)."""
+    global _WRITE_RE
+    import re
+    from app.core.text_utils import latin1_safe
+    if not params:
+        return params
+    if _WRITE_RE is None:
+        _WRITE_RE = re.compile(r"^\s*(?:INSERT|UPDATE|REPLACE)\s+(?:IGNORE\s+)?(?:INTO\s+)?`?(\w+)`?", re.I)
+    m = _WRITE_RE.match(query or '')
+    if not m or m.group(1).lower() not in _LATIN1_TABLES:
+        return params
+    fix = lambda v: latin1_safe(v) if isinstance(v, str) else v
+    return {k: fix(v) for k, v in params.items()} if isinstance(params, dict) else tuple(fix(v) for v in params)
+
+
+class _Latin1Cursor:
+    """A cursor whose writes to the portal's latin1 tables are made latin1-safe."""
+    def __init__(self, cur):
+        self._cur = cur
+
+    def execute(self, query, params=None):
+        return self._cur.execute(query, latin1_params(query, params))
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
 
 
 class DatabaseManager:
@@ -63,6 +97,7 @@ class DatabaseManager:
             return False
     
     def execute_query(self, query: str, params=None, commit=False):
+        params = latin1_params(query, params)
         """
         Execute a database query using connection from pool
         
@@ -179,6 +214,30 @@ class DatabaseManager:
             if conn:
                 conn.close()
     
+    @contextmanager
+    def transaction(self):
+        """One connection and cursor for several statements, committed together or rolled back."""
+        conn = self.get_connection()
+        cur = conn.cursor(dictionary=True, buffered=True)
+        try:
+            try:
+                conn.start_transaction()
+            except Exception:
+                pass
+            yield _Latin1Cursor(cur)
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                cur.close()
+            finally:
+                conn.close()
+
     def close(self):
         """Close connection pool - not typically needed"""
         logger.info("Connection pool will be cleaned up automatically")

@@ -1333,6 +1333,15 @@ Let's begin — what is the **date of the program**? आप हिंदी म�
                             }
                         else:
                             result = self._create_event_and_apr(event_data)
+                            if isinstance(result, dict) and result.get('success'):
+                                self.last_creation_result = result
+                    elif ev_type == 'virasat':
+                        if not (event_data.get('virasat_events') and event_data.get('institution_name')):
+                            result = {"success": False, "error": "virasat_events and institution_name are required for a Virasat."}
+                        else:
+                            result = self._create_event_and_apr(event_data)
+                            if isinstance(result, dict) and result.get('success'):
+                                self.last_creation_result = result
                     else:
                         required_fields = ['start_date', 'artist_name', 'institution_name', 'city', 'state']
                         missing_fields = [f for f in required_fields if not event_data.get(f)]
@@ -2533,7 +2542,7 @@ Let's begin — what is the **date of the program**? आप हिंदी म�
             # So the reports can be checked without waiting for the weekly schedule.
             # Runs ALONGSIDE the normal weekly cron job in app/__init__.py, not instead
             # of it. Toggle off later by setting SEND_WEEKLY_REPORTS_ON_APR_CREATE=false.
-            if apr_data and os.getenv('SEND_WEEKLY_REPORTS_ON_APR_CREATE', 'true').lower() == 'true':
+            if apr_data and os.getenv('SEND_WEEKLY_REPORTS_ON_APR_CREATE', 'false').lower() == 'true':
                 self._fire_weekly_reports_async()
 
             # ── Return result ─────────────────────────────────────────────────

@@ -283,3 +283,114 @@ select.field-input { padding: 5px 6px; }
 .login .btn { width: 100%; }
 .muted { color: var(--mitti); }
 .login-msg { min-height: 1.5em; color: var(--kumkum); }
+
+/* ── Conversation first (October 2026) ───────────────────────────────────────────────────────────────
+   One calm column, like a conversation with a colleague: no side panels; details only when asked for. */
+:root { --bubble: #F4ECE3; --col: 760px; }
+@media (prefers-color-scheme: dark) { :root { --bubble: #2B211C; } }
+body::before { display: none; }
+.app, .app.app { grid-template-columns: minmax(0, 1fr) !important; }
+.rail { display: none !important; }
+
+.topbar { padding: 10px 16px; border-bottom: 1px solid transparent; background: var(--page); }
+.topbar .brand img { height: 22px; }
+.topbar h1 { font-size: 18px; color: var(--kajal); }
+.topbar-actions { gap: 4px; }
+.topbar .icon-btn { width: 38px; height: 38px; border-radius: 10px; color: var(--mitti); }
+.topbar .icon-btn:hover { background: var(--panel); color: var(--kajal); }
+.lang select { border: 0; background: transparent; color: var(--mitti); font-size: 15px; padding: 6px 4px; cursor: pointer; }
+.lang select:hover { color: var(--kajal); }
+
+.messages { padding: 26px max(16px, calc((100% - var(--col)) / 2)) 16px; scroll-behavior: smooth; }
+.msg { max-width: 100%; margin: 0 0 22px; font-size: 16.5px; line-height: 1.65; }
+.msg.assistant { border-left: 0; padding: 0; color: var(--kajal); }
+.msg.assistant strong { color: inherit; font-weight: 600; }
+.msg.user { max-width: min(80%, 620px); background: var(--bubble); color: var(--kajal); padding: 10px 16px; border-radius: 20px; }
+.msg.typing { color: var(--mitti); font-style: normal; }
+.card, .cands, .artifact { max-width: 100%; }
+.card { border-radius: 16px; box-shadow: none; border: 1px solid var(--line); }
+
+.composer-wrap { border-top: 0; background: linear-gradient(to top, var(--page) 78%, rgba(255, 255, 255, 0)); padding: 0 0 env(safe-area-inset-bottom); }
+@media (prefers-color-scheme: dark) { .composer-wrap { background: linear-gradient(to top, var(--page) 78%, rgba(23, 16, 13, 0)); } }
+.composer-inner { max-width: calc(var(--col) + 32px); margin: 0 auto; padding: 0 16px 8px; display: flex; flex-direction: column; }
+.composer { align-items: flex-end; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 26px; background: var(--page);
+            box-shadow: 0 4px 22px -12px rgba(42, 27, 20, .35); }
+.composer:focus-within { border-color: #D9C6B2; box-shadow: 0 6px 26px -12px rgba(42, 27, 20, .45); }
+.composer textarea { border: 0 !important; background: transparent !important; padding: 9px 6px !important; font-size: 16.5px; box-shadow: none !important; }
+.composer textarea:focus { outline: none; }
+.composer .icon-btn { width: 40px; height: 40px; border-radius: 50%; color: var(--mitti); }
+.composer .icon-btn:hover { background: var(--panel); color: var(--kajal); }
+.composer .mic { width: 40px; height: 40px; flex: 0 0 40px; }
+.composer .mic svg { width: 21px; height: 21px; }
+.composer .send { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 50%; }
+.fineprint { margin: 7px 0 0; text-align: center; font-size: 12.5px; color: var(--mitti); }
+.chips { padding: 0 0 10px; gap: 8px; }
+.chip { border: 1px solid var(--line); color: var(--kajal); background: var(--page); font-size: 14.5px; font-weight: 500; padding: 7px 14px; }
+.chip:hover { border-color: #D9C6B2; background: var(--panel); }
+
+/* a new conversation: the greeting and the message box in the middle, a few quiet suggestions below */
+body.is-empty .conversation { justify-content: center; }
+body.is-empty .messages { flex: 0 1 auto; overflow: visible; padding-top: 0; padding-bottom: 6px; }
+body.is-empty .composer-wrap { background: transparent; flex: 0 0 auto; }
+body.is-empty #chips { order: 3; flex-wrap: wrap; justify-content: center; overflow: visible; padding: 16px 0 0; }
+body.is-empty .fineprint { display: none; }
+body.is-empty .conversation::after { content: ""; flex: 0 0 12vh; }
+.welcome, .welcome.welcome { display: block !important; text-align: center; margin: 0 auto 24px; }
+.welcome h2 { margin: 0 0 10px; font: 400 clamp(30px, 4.6vw, 42px)/1.15 var(--head); color: var(--kumkum); }
+.welcome p { margin: 0 auto; max-width: 560px; font-size: 17px; color: var(--mitti); }
+
+/* details: a quiet pill in the header, opening a drawer */
+.topbar .draft-pill { margin: 0; padding: 4px 12px 4px 4px; gap: 8px; font-size: 14.5px; border-radius: 999px; }
+.topbar .draft-pill .pill-open { display: none; }
+.sheet-title { margin-right: auto; font-weight: 600; color: var(--kajal); padding-left: 4px; }
+.sheet-handle { justify-content: space-between; }
+@media (min-width: 760px) {
+  .app, .app.app { grid-template-columns: minmax(0, 1fr) !important; }
+  .draft { position: fixed !important; top: 0; right: 0; bottom: 0; left: auto; width: min(440px, 92vw); height: 100%; max-height: none;
+           transform: translateX(105%); border-radius: 0; border-left: 1px solid var(--line); box-shadow: var(--lift); z-index: 30;
+           transition: transform .22s ease; }
+  .draft.open { transform: none; }
+  .draft-pill:not([hidden]) { display: flex !important; }
+  .sheet-handle { display: flex !important; padding: 14px 16px 8px; }
+  .sheet-handle span { display: none; }
+  .backdrop:not([hidden]) { display: block !important; background: rgba(23, 16, 13, .18); }
+  .messages { padding-left: max(24px, calc((100% - var(--col)) / 2)); padding-right: max(24px, calc((100% - var(--col)) / 2)); }
+  .composer { padding: 8px 8px 8px 8px; }
+}
+@media (min-width: 1120px) {
+  .app, .app.app { grid-template-columns: minmax(0, 1fr) !important; }
+  .rail { display: none !important; }
+}
+@media (max-width: 520px) {
+  .topbar { padding: 8px 10px; }
+  .topbar .draft-pill #pill-text { max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #btn-new { display: none; }
+  .messages { padding: 18px 14px 12px; }
+  .composer-inner { padding: 0 10px 6px; }
+  .welcome h2 { font-size: 30px; }
+}
+.menu-label { margin: 6px 12px 2px; font-size: 13px; color: var(--mitti); }
+.recent { list-style: none; margin: 0; padding: 0 4px; }
+.recent button { width: 100%; text-align: left; border: 0; background: transparent; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+.recent button:hover { background: var(--panel); }
+.recent button span { display: block; font-size: 13px; color: var(--mitti); }
+/* the taal ring appears only while listening; at rest the mic is a quiet round button */
+.composer .mic .taal { opacity: 0; transition: opacity .2s ease; }
+.composer .mic.recording .taal, .composer .mic.busy .taal { opacity: 1; }
+.composer .mic { background: var(--sindoor); }
+.composer .mic.recording .taal i.on { transform: rotate(calc(var(--i) * 22.5deg)) translateY(-27px) scale(1.4); }
+
+/* SPIC MACAY accents on the calm layout (October 2026): a red-to-gold band, red titles, saffron for your words, a gold speaker */
+body::before { display: block !important; content: ""; position: fixed; inset: 0 0 auto 0; height: 4px; z-index: 50;
+               background: linear-gradient(90deg, var(--sindoor) 0%, var(--sindoor) 45%, var(--haldi) 100%); }
+.welcome h2 { color: var(--sindoor); }
+.msg.user { background: var(--kesar); border: 1px solid #F1DFA9; }
+@media (prefers-color-scheme: dark) { .msg.user { border-color: #4A3A22; } }
+.chip:hover { border-color: var(--haldi); background: var(--kesar); }
+.chip.hear { border-color: var(--sindoor); color: var(--sindoor); font-weight: 600; animation: hear-pulse 1.8s ease-in-out infinite; }
+@keyframes hear-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(163, 22, 30, .3); } 50% { box-shadow: 0 0 0 7px rgba(163, 22, 30, 0); } }
+.composer .speaker-toggle { color: var(--mitti); }
+.composer .speaker-toggle[aria-pressed="true"] { background: var(--haldi); color: #4A2400; }
+.composer .speaker-toggle[aria-pressed="true"]:hover { background: #F2B81A; }
+.topbar h1 { color: var(--kumkum); }
+@media (prefers-reduced-motion: reduce) { .chip.hear { animation: none; } }

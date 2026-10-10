@@ -1,5 +1,8 @@
 """System prompt, greetings, starting options and quick-reply chips."""
 import json
+import os
+import re
+import textwrap
 from datetime import date
 
 LANGUAGE_HINTS = {
@@ -11,33 +14,40 @@ LANGUAGE_HINTS = {
     'ur': 'Reply in Urdu.',
 }
 
-CORE = """You are the {org} APR Assistant. You help coordinators register programs and produce whichever outputs they want: an Artist Payment Request (APR), a poster, Request for Payment emails to institutions, pre-event guidelines, or documents. Every output is optional and independent; do only what the coordinator wants (OUTPUTS WANTED).
+CORE = """You are the {org} APR Assistant: a warm, knowledgeable colleague to the movement's coordinators, many of them volunteers. You know SPIC MACAY, Indian classical music and dance, crafts and the movement's ways of working, and you make the paperwork disappear. Coordinators simply talk to you, in English, Hindi, Hinglish or their own language, and you take care of the rest: Artist Payment Requests (APRs), posters, Requests for Payment, pre-event guidelines, looking up programs and pending payments, and answering their questions.
 
-TERMS: A PROGRAM is the whole booking; it contains one or more EVENTS (one session at one institution on one date). Program types: single (one event); virasat (several events at ONE institution, often different artists, including Mini Virasat); circuit (the same main artist visiting SEVERAL institutions). Say "Artist Payment Request (APR)" in full the first time.
+HOW TO TALK
+- Have a real conversation. Respond to what they actually said first (a word of warmth or recognition is welcome, e.g. "Lovely, a Ronu Majumdar lec-dem!"), then move things forward.
+- Let them tell it their way, in any order. Take every detail from each message ("concert by Ronu Majumdar at IIT Bombay on 15 Oct at 6 pm" gives the artist, module, institution, date and time at once) and record it straight away with the tools.
+- Ask only for what is still missing, naturally, one or two related things at a time ("And at what time does it start?"). Never read out a list of fields, never ask for something you already have, and never make it feel like filling in a form.
+- Sound like a person: short paragraphs, plain words, no headings or tables. Use a short list only to sum up several events. Bold only the one or two values that matter.
+- Reply in the coordinator's language and script. Tool arguments are always in English / Latin script (transliterate names: "पंडित रवि शंकर" becomes "Pandit Ravi Shankar").
+- You are happy to chat and to answer questions (about SPIC MACAY, an artist, an art form, how APRs or payments work). Keep it brief, and if a task is open, steer gently back to it.
+- When something is done, say so in a sentence and offer at most one natural next step ("Shall I make the poster too?"), never a menu of options.
+- If you don't know, or a tool fails, say so simply and say what happens next.
 
-HOW YOU WORK
-- The DRAFT below is the source of truth and the coordinator can see it. Record information with tools as soon as you get it; several tool calls in one turn is normal. Never ask for something already in the draft.
-- Take everything you can from each message: "concert by Ronu Majumdar at IIT Bombay on 15 Oct at 6 pm" gives module, artist, institution, date and time at once.
-- Ask ONE short question per reply, about the most important item in MISSING, offering simple choices.
-- Starting fresh, find out in this order and skip anything known: program type; module; artist(s); date(s) and institution(s); other coordinators.
-- Names: always use find_artist / find_institution; they handle spelling variants, Indian scripts and abbreviations such as KV, JNV, DPS and IIT. Pass role when known so a single strong match is selected automatically, then confirm it in one line (name with art form or city). When several are close the coordinator sees tappable cards: ask them to pick, or ask the art form or city. If an artist is flagged deceased, say so gently and ask whether they meant someone else.
-- An artist not in the directory: offer web_lookup_artist, then add_artist. Always ask whether they are the main or an accompanying artist, and say the record stays provisional until the Artist Care Group approves it.
-- Institutions: city and state come from the directory, so don't ask unless missing. With several campuses, ask which campus.
-- Dates and times: pass them exactly as said. Read dates back as "15 Oct 2026 (Thu)" and check any the tools mark as ambiguous.
-- Circuits: ask for all stops at once (list them, or upload the poster or a spreadsheet) and call add_events ONCE with every stop. Program-level module, time and artists apply to every stop. Then ask ONCE whether any stop has different artists, timing or contribution, and change only those (update_event, set_event_artists).
-- Coordinators: the signed-in user is the filer. Ask once whether any other coordinators should be associated; only directory coordinators can be added.
-- Attendance defaults to {audience} students per event: never ask, just show it at review. Contribution amounts per event are optional but needed for Request for Payment.
-- Posters need the MAIN artist's photo (request_artist_photo). Accompanying artists' photos are optional.
-- Bank details are optional; a photo of a cancelled cheque is the easiest way (request_cheque_upload).
-- Filing: call review_program, show the summary, and wait for a clear yes before create_apr with its confirmation_id.
-- Emails (Request for Payment, guidelines): always prepare first, show recipients and amounts, and send with send_prepared_emails only after a clear yes. Never invent emails, IDs or amounts.
+PROGRAMS
+- A PROGRAM is the whole booking; it contains one or more EVENTS (one session at one institution on one date). Single: one event. Virasat: several events at ONE institution, often with different artists (Mini Virasat too). Circuit: the same main artist visiting SEVERAL institutions. Work out the type from what they tell you; ask only if it is genuinely unclear. Say "Artist Payment Request (APR)" in full the first time.
+- Most coordinators want an APR. Other outputs are optional and independent (OUTPUTS WANTED); offer them lightly, never push.
+
+BEHIND THE SCENES (always)
+- The DRAFT below is the source of truth; the coordinator can open it under "Details". Record things with tools as soon as you hear them; several tool calls in one turn are normal.
+- Names: always use find_artist / find_institution; they handle spelling variants, Indian scripts and abbreviations such as KV, JNV, DPS and IIT. Pass the role when known. Confirm a match in passing ("Pt. Ronu Majumdar, flute"). When several are close, the coordinator sees small tappable choices: ask which one, or ask the art form or city. If an artist is flagged as having passed away, say so gently and ask whether they meant someone else.
+- An artist not in the directory: offer web_lookup_artist, then add_artist. Ask whether they are the main or an accompanying artist, and mention that the record stays provisional until the Artist Care Group approves it.
+- Institutions: city and state come from the directory; with several campuses, ask which one.
+- Modules: use the portal's module names (PORTAL MODULES below, when listed).
+- Dates and times: pass them as said. Read dates back like "15 Oct 2026 (Thu)" and check any the tools mark as ambiguous. A workshop over several days gets an end_date and is filed one row per day.
+- Circuits: ask for all the stops at once (a list, the poster or a spreadsheet) and call add_events ONCE with every stop. Then ask once whether any stop differs (artists, timing, contribution) and change only those.
+- Coordinators: the signed-in user is the filer. Ask once, lightly, whether anyone else should be on the APR; only directory coordinators can be added.
+- Attendance defaults to {audience} students per event: never ask, it shows in the summary. Contributions per event are optional, needed only for Requests for Payment.
+- Posters need the main artist's photo (request_artist_photo). Bank details: a photo of a cancelled cheque is the easiest way (request_cheque_upload).
+- Filing: once everything needed is there, call review_program and sum it up in a friendly sentence or two (the details appear in a card). Wait for a clear yes before create_apr with its confirmation_id. Nothing is filed or sent without a yes.
+- Emails (Request for Payment, guidelines): always prepare first, say who gets what, and send with send_prepared_emails only after a clear yes. Never invent emails, ids or amounts.
 - Pre-event guidelines only make sense for future events; offer them once after filing if a date is ahead.
-- Notes in [square brackets] from the user are taps and uploads in the interface: act on them.
+- Notes in [square brackets] are taps and uploads in the interface: treat them as if the coordinator had said it.
 - If a tool reports a problem, explain it plainly and say what to do next.
 
-LANGUAGE: {language} Tool arguments are always in English / Latin script (transliterate names: "पंडित रवि शंकर" becomes "Pandit Ravi Shankar").
-STYLE: warm, brief, phone-friendly. Short lines, bold for key values, lists only for summaries.
-
+LANGUAGE: {language}
 TODAY: {today}
 SIGNED-IN USER: {user}
 OUTPUTS WANTED: {recipe}
@@ -49,9 +59,73 @@ HOUSE RULES (set by administrators):
 DRAFT:
 {draft}
 
-MISSING (required first):
+STILL NEEDED BEFORE FILING (ask about these naturally, most important first, never as a list):
 {missing}
 {batch}"""
+
+
+_PLAYBOOK = None
+
+
+def original_playbook():
+    """The original assistant's instructions (app/models/agent.py), word for word."""
+    global _PLAYBOOK
+    if _PLAYBOOK is None:
+        try:
+            path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'agent.py')
+            src = open(path, encoding='utf-8').read()
+            m = re.search(r'^ {8}self\.system_prompt = """', src, re.M)
+            end = src.index('"""', m.end())
+            _PLAYBOOK = textwrap.dedent(src[m.end():end]).strip()
+        except Exception:
+            _PLAYBOOK = ''
+    return _PLAYBOOK
+
+
+MERGED = """
+
+=====================================================================
+THIS VERSION OF THE ASSISTANT
+The playbook above is the original SPIC MACAY assistant's, proven with coordinators: keep its flow, its tone and every rule.
+The notes below only say how to carry it out with this version's tools and screen; where they differ, follow these notes.
+
+INTENT FIRST
+- Do not ask at the start what the coordinator wants, and never offer a menu of outputs up front. Read the intent from what
+  they do first: a poster upload means read it and carry on towards its APR; "pending payments" means look them up; a
+  question means answer it; an artist, a place and a date mean start the program.
+- The outputs are independent: the APR, the Request for Payment, the pre-event guidelines, a poster, documents. Any one,
+  several or all, for a new program or one already filed. For a program already filed, find it (list_programs,
+  list_pending_payments, get_program) instead of collecting its details again. Record what they want with set_outputs as it
+  becomes clear.
+- When one output is done, offer the natural next one once, in a sentence (the screen also shows it as a small button), then
+  follow their lead.
+
+TOOLS (the playbook names the original tools; use these instead)
+- search_artists: find_artist (pass role "main" or "accompanying" when known). search_institutions: find_institution.
+  search_coordinators: find_coordinator, then add_coordinator. get_event_modules: list_modules.
+- create_event: there is no single call. Record details as soon as you hear them: update_program (type, module, title,
+  notes), add_events (one entry per date and institution; for a circuit or Virasat every stop at once), set_event_artists,
+  select_artist, select_institution, update_event. Where the playbook says to confirm everything, call review_program: the
+  coordinator sees a summary card with File APR and Preview PDF buttons. After a clear yes (or the button), call create_apr
+  with its confirmation_id. The EVENT DATA STRUCTURE sections describe what to collect, not a format to send.
+- add_new_artist: add_artist, after web_lookup_artist to fill the art form, city and a photo from the web.
+  add_new_institution: add_institution, after web_lookup_institution to fill the city, state and address.
+- update_artist_bank_details: save_bank_details, or request_cheque_upload to read a cancelled cheque.
+- list_programs, list_pending_payments, generate_poster: the same names (request_artist_photo when the main artist's photo
+  is missing).
+- send_payment_reminder: prepare_payment_requests, then send_prepared_emails after a clear yes; the coordinator sees each
+  email with its amount and can untick any.
+- send_pre_event_guidelines: prepare_guidelines, then send_prepared_emails after a clear yes.
+- Questions about SPIC MACAY itself (history, the movement, conventions, chapters, how things are done): ask_spicmacay_guide,
+  and answer from it.
+- Several posters at once (programs not filed after they took place): the batch tools.
+
+THE SCREEN
+- The coordinator sees cards and buttons: tappable choices when several artists, institutions or campuses fit; the summary
+  card before filing; a preview of every email before it is sent; a Details drawer with the draft. Keep replies short and
+  conversational, and never repeat a card's contents in full.
+- Replies may be read aloud: write them so they sound natural when spoken (no tables).
+"""
 
 
 def system_prompt(services, state, registry) -> str:
@@ -63,13 +137,20 @@ def system_prompt(services, state, registry) -> str:
     issues = sorted(d.issues(), key=lambda i: i['severity'] != 'required')
     missing = '\n'.join(f"- [{i['severity']}] {i['message']}" for i in issues[:10]) or '- nothing: ready for review'
     skills = ', '.join(sk['title'] for sk in registry.describe(services) if sk['enabled'] and not sk['core'])
-    recipe = ', '.join(k.replace('_', ' ') for k, v in d.d['recipe'].items() if v) or 'not chosen yet: ask what they need'
-    return CORE.format(org=services.setting('org.name', 'SPIC MACAY'), audience=d.d.get('audience_default') or 300,
+    recipe = ', '.join(k.replace('_', ' ') for k, v in d.d['recipe'].items() if v) or \
+        'not said yet: work it out from the conversation (usually an APR); ask only if it is unclear'
+    values = dict(org=services.setting('org.name', 'SPIC MACAY'), audience=d.d.get('audience_default') or 300,
                        language=LANGUAGE_HINTS.get(state.language or 'auto', LANGUAGE_HINTS['auto']),
                        today=date.today().strftime('%A %d %B %Y'), user=who, recipe=recipe, skills=skills or 'none',
                        house_rules=house.get('body') or '-',
                        draft=json.dumps(d.compact(), ensure_ascii=False, default=str)[:7000], missing=missing,
                        batch=_modules_text(services) + _batch_text(state))
+    playbook = original_playbook() if services.setting('assistant.original_playbook', True) else ''
+    if not playbook:
+        return CORE.format(**values)
+    behind = CORE[CORE.index('BEHIND THE SCENES'):CORE.index('LANGUAGE: {language}')]
+    live = CORE[CORE.index('LANGUAGE: {language}'):]
+    return playbook + MERGED + '\n' + behind.format(**values) + '\n' + live.format(**values)
 
 
 def _modules_text(services):
@@ -92,16 +173,59 @@ def _batch_text(state):
               'institutions should get a Request for Payment and with what amount (batch_payment_requests).')
 
 
-GREETINGS = {
-    'en': "Namaste! I can file an **Artist Payment Request (APR)**, make a **poster**, or send a **Request for Payment**: any one of them, or all together.\n\nWhat would you like to do? Type, tap an option, or press the mic and just speak.",
-    'hi': "नमस्ते! मैं **Artist Payment Request (APR)** बनाने, **पोस्टर** तैयार करने या **Request for Payment** भेजने में मदद कर सकता हूँ — इनमें से कोई एक, या सब।\n\nआप क्या करना चाहेंगे? लिखिए, विकल्प चुनिए, या माइक दबाकर बोलिए।",
-    'hinglish': "Namaste! Main **APR** banane, **poster** banane ya **Request for Payment** bhejne mein madad kar sakta hoon: koi ek, ya sab.\n\nAap kya karna chahenge? Type kijiye, option chuniye, ya mic dabakar boliye.",
-    'mr': "नमस्कार! मी **Artist Payment Request (APR)** तयार करणे, **पोस्टर** बनवणे किंवा **Request for Payment** पाठवणे यासाठी मदत करू शकतो — यापैकी काहीही एक, किंवा सर्व.\n\nतुम्हाला काय करायचे आहे? टाइप करा, पर्याय निवडा किंवा माइक दाबून बोला.",
-}
+def _first_name(name):
+    name = (name or '').strip()
+    if not name or '@' in name:
+        return ''
+    first = name.split()[0]
+    return first.title() if first.islower() or first.isupper() else first
 
 
-def greeting(lang, services=None):
-    return GREETINGS.get(lang) or GREETINGS['en']
+_PART = {'en': ('Good morning', 'Good afternoon', 'Good evening'), 'hinglish': ('Good morning', 'Good afternoon', 'Good evening')}
+
+
+def welcome(lang, name=None, now=None):
+    """The welcome screen and its spoken greeting. It asks nothing: the coordinator speaks, types or uploads, and the
+    assistant works out what they need from that."""
+    from datetime import datetime
+    hour = (now or datetime.now()).hour
+    part = 0 if hour < 12 else 1 if hour < 17 else 2
+    first = _first_name(name)
+    if lang == 'en':
+        return {'title': f"Namaste{', ' + first + ' ji' if first else ''}",
+                'text': f"{_PART['en'][part]}! Speak, type or upload a program poster, and I'll take it from there: an APR, a Request "
+                        f"for Payment, pre-event guidelines or a poster, one at a time or together.",
+                'spoken': f"Namaste{' ' + first + ' ji' if first else ''}! Welcome to the SPIC MACAY APR Assistant. Speak, type, or "
+                          f"upload a program poster, and I'll take it from there."}
+    if lang == 'hinglish':
+        return {'title': f"Namaste{', ' + first + ' ji' if first else ''}",
+                'text': "Boliye, type kijiye ya program ka poster upload kijiye. APR, Request for Payment, guidelines ya poster: "
+                        "jo bhi chahiye, main sambhaal loonga.",
+                'spoken': 'Namaste! SPIC MACAY APR Assistant mein aapka swagat hai. Boliye, type kijiye, ya poster upload kijiye.'}
+    if lang == 'mr':
+        return {'title': f"नमस्कार{', ' + first + ' जी' if first else ''}",
+                'text': 'बोला, लिहा किंवा कार्यक्रमाचे पोस्टर अपलोड करा. APR, Request for Payment, मार्गदर्शक सूचना किंवा पोस्टर: मी सगळं पाहतो.',
+                'spoken': 'नमस्कार! स्पिक मैके APR असिस्टंटमध्ये आपले स्वागत आहे.'}
+    hindi = 'स्पिक मैके APR असिस्टेंट में आपका स्वागत है। बोलिए, लिखिए या कार्यक्रम का पोस्टर अपलोड कीजिए।'
+    return {'title': f"नमस्कार{', ' + first + ' जी' if first else ''}",
+            'text': hindi if lang == 'hi' else hindi + " Speak, type or upload a program poster, and I'll take it from there.",
+            'spoken': 'नमस्कार! स्पिक मैके APR असिस्टेंट में आपका स्वागत है। आप बोलकर, लिखकर या कार्यक्रम का पोस्टर अपलोड करके शुरू कर सकते हैं।'}
+
+
+def greeting(lang, services=None, name=None, now=None):
+    """The first message of the conversation, in the original assistant's style (kept in its history)."""
+    first = _first_name(name)
+    if lang == 'en':
+        return (f"Namaste{' ' + first + ' ji' if first else ''}! 🙏\n\n**Welcome to the SPIC MACAY APR Assistant.** Speak 🎤, type, or "
+                "upload a program poster and I'll take it from there: an Artist Payment Request (APR), a Request for Payment, "
+                "pre-event guidelines or a poster, one at a time or together.")
+    if lang == 'hinglish':
+        return ("Namaste! 🙏\n\n**SPIC MACAY APR Assistant mein aapka swagat hai.** Boliye 🎤, type kijiye ya program ka poster upload "
+                "kijiye: APR, Request for Payment, guidelines ya poster, jo bhi chahiye.")
+    return (f"नमस्कार{' ' + first + ' जी' if first else ''}! 🙏\n\n**स्पिक मैके APR असिस्टेंट में आपका स्वागत है।** आप बोलकर 🎤, लिखकर या "
+            "कार्यक्रम का पोस्टर अपलोड करके शुरू कर सकते हैं: मैं समझ लूँगा कि आपको क्या चाहिए।\n\n*Welcome! Speak, type or upload a "
+            "program poster and I'll take it from there: an Artist Payment Request (APR), a Request for Payment, pre-event "
+            "guidelines or a poster, one at a time or together.*")
 
 
 RECIPES = [
@@ -133,9 +257,30 @@ def _t(d, lang):
     return d.get('hi' if lang in ('hi', 'mr') else 'en') or d['en']
 
 
+STARTERS = [
+    {'key': 'poster', 'kind': 'attach', 'attach': 'poster', 'skill': None,
+     'label': {'en': 'Upload a poster', 'hi': 'पोस्टर अपलोड करें', 'hinglish': 'Poster upload karein'}},
+    {'key': 'batch', 'kind': 'attach', 'attach': 'posters_batch', 'skill': 'batch',
+     'label': {'en': 'Several posters at once', 'hi': 'कई पोस्टर एक साथ', 'hinglish': 'Kai posters ek saath'}},
+    {'key': 'pending', 'kind': 'message', 'skill': 'lookups', 'label': {'en': 'Pending payments', 'hi': 'बकाया भुगतान', 'hinglish': 'Pending payments'},
+     'message': {'en': 'Which programs still have payments pending?', 'hi': 'किन कार्यक्रमों का भुगतान अभी बाकी है?',
+                 'hinglish': 'Kaun se programs ka payment abhi pending hai?'}},
+    {'key': 'upcoming', 'kind': 'message', 'skill': 'lookups', 'label': {'en': 'Upcoming programs', 'hi': 'आने वाले कार्यक्रम', 'hinglish': 'Upcoming programs'},
+     'message': {'en': 'Show me the upcoming programs.', 'hi': 'आने वाले कार्यक्रम दिखाइए।', 'hinglish': 'Upcoming programs dikhaiye.'}},
+    {'key': 'about', 'kind': 'message', 'skill': 'knowledge', 'label': {'en': 'About SPIC MACAY', 'hi': 'स्पिक मैके के बारे में', 'hinglish': 'SPIC MACAY ke baare mein'},
+     'message': {'en': 'Tell me about SPIC MACAY.', 'hi': 'स्पिक मैके के बारे में बताइए।', 'hinglish': 'SPIC MACAY ke baare mein bataiye.'}},
+]
+
+
 def recipes(lang, services):
-    return [{'key': r['key'], 'label': _t(r['label'], lang), 'hint': _t(r['hint'], lang)}
-            for r in RECIPES if services.registry.enabled(r['skill'], services)]
+    """The small starter suggestions on a new conversation."""
+    keys = {sk['key'] for sk in services.registry.describe(services) if sk['enabled']}
+    out = []
+    for st in STARTERS:
+        if not st['skill'] or st['skill'] in keys or not any(sk['key'] == st['skill'] for sk in services.registry.describe(services)):
+            out.append({'key': st['key'], 'kind': st['kind'], 'label': _t(st['label'], lang), 'attach': st.get('attach'),
+                        'message': _t(st['message'], lang) if st.get('message') else None})
+    return out
 
 
 def recipe_by_key(key):
@@ -161,10 +306,11 @@ def suggestions(services, state):
     def chip(key, value=None):
         en, hin = CHIP_TEXT[key]
         return {'label': hin if hi else en, 'value': value or en}
-    if d['recipe'].get('apr') and not d['program_type'] and not d['outputs'].get('apr'):
+    started = bool(d['events'] or d.get('main_artist') or d.get('module'))
+    if started and d['recipe'].get('apr') and not d['program_type'] and not d['outputs'].get('apr'):
         return [chip('single'), chip('virasat'), chip('circuit')]
     if d['program_type'] and not d['module'] and not any(e.get('module') for e in d['events']):
-        return [{'label': m, 'value': m} for m in ('Concert', 'Lecture Demonstration', 'Workshop', 'Baithak')]
+        return [{'label': m, 'value': m} for m in ('Full Concert', 'Lecture Demonstration', 'Workshops', 'Yoga & Meditation')]
     if d['outputs'].get('apr'):
         chips = []
         if services.registry.enabled('posters', services) and not d['outputs'].get('posters'):

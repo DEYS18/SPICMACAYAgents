@@ -1,3 +1,5 @@
+import re
+import os
 """Admin console API: templates (versioned, with live preview), settings and skill switches,
 approvals (provisional artists and institutions, coordinator requests), directory flags and the
 activity log. Every change is audited."""
@@ -57,6 +59,17 @@ def _preview(s, key, kind, body, subject=None, text=None):
     return {'type': 'text', 'text': body}
 
 
+def _parts(text):
+    """The placeholders a template uses, e.g. apr.number or amount|inr (spaces ignored)."""
+    return {re.sub(r'\s+', '', m) for m in re.findall(r'\{\{\s*(.+?)\s*\}\}', text or '')}
+
+
+def _missing_parts(key, body, subject):
+    """Placeholders the original template relies on that this version leaves out: the "major parts" to keep."""
+    d = DEFAULT_TEMPLATES.get(key) or {}
+    return sorted(_parts((d.get('body') or '') + ' ' + (d.get('subject') or '')) - _parts((body or '') + ' ' + (subject or '')))
+
+
 def _validate(s, key, kind, body, subject, text):
     if kind == 'email':
         v = s.renderer.validate(body, subject, ctx=_sample(s, key))
@@ -103,7 +116,27 @@ def overview():
                     'usage': s.gov.list_usage(7), 'models': {'conversation': s.setting('assistant.model'),
                                                              'vision': s.setting('assistant.vision_model'),
                                                              'speech': s.setting('voice.stt_model')},
-                    'skills': s.registry.describe(s)})
+                    'skills': s.registry.describe(s), 'ai_health': s.gov.cache_get('ai:health', max_age_days=30),
+                    'version': __import__('app.core.version', fromlist=['APR_VERSION']).APR_VERSION})
+
+
+@bp.post('/admin/api/ai-check')
+@require_admin
+def ai_check():
+    """Is the server's OpenAI key accepted, and can it use the conversation model? Nothing is generated."""
+    from app.agents import llm
+    s = svc()
+    if not s.llm_factory:
+        return jsonify({'ok': False, 'message': 'OPENAI_API_KEY is not set on the server.'})
+    model = s.setting('assistant.model', 'gpt-4o')
+    try:
+        s.llm_factory().models.retrieve(model)
+    except Exception as e:
+        kind, msg = llm.describe_ai_error(e)
+        llm.record_ai_result(s.gov, False, kind, msg)
+        return jsonify({'ok': False, 'kind': kind, 'message': msg})
+    llm.record_ai_result(s.gov, True, None, f'The key works and can use {model}.')
+    return jsonify({'ok': True, 'message': f'The key works and can use {model}.'})
 
 
 @bp.get('/admin/api/templates')
@@ -141,6 +174,11 @@ def template_save(key):
     v = _validate(s, key, cur['kind'], new_body, subject, text)
     if not v.get('ok'):
         return jsonify({'error': v.get('error'), 'line': v.get('line')}), 400
+    if cur['kind'] in ('email', 'email_layout') and not body.get('confirm_missing'):
+        missing = _missing_parts(key, new_body, subject)
+        if missing:
+            return jsonify({'error': 'missing_parts', 'missing': missing,
+                            'message': 'This version leaves out parts the original template relies on.'}), 409
     meta = dict(cur.get('meta') or {})
     if text is not None:
         if text.strip():
@@ -150,6 +188,37 @@ def template_save(key):
     ver = s.gov.save_template(key, new_body, subject=subject, meta=meta, actor=_actor(), note=body.get('note') or '',
                               activate=body.get('activate', True))
     return jsonify({'ok': True, 'version': ver, 'undeclared': v.get('undeclared', [])})
+
+
+@bp.post('/admin/api/documents/<key>')
+@require_admin
+def document_upload(key):
+    """A revised version of a governed document (PDF), kept with every earlier one."""
+    from app.core.documents import DOCUMENTS, store_upload
+    s = svc()
+    if key not in DOCUMENTS:
+        return jsonify({'error': 'Unknown document'}), 404
+    f = request.files.get('file')
+    try:
+        meta = store_upload(s, key, f.read() if f else b'', f.filename if f else '')
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    ver = s.gov.save_template(key, '', meta=meta, actor=_actor(), note=request.form.get('note') or 'New version uploaded', activate=True)
+    s.gov.audit(_actor(), 'document.upload', key, {'version': ver, 'name': meta['original_name'], 'size': meta['size']})
+    return jsonify({'ok': True, 'version': ver})
+
+
+@bp.get('/admin/api/documents/<key>/file')
+@require_admin
+def document_file(key):
+    from flask import send_file
+    from app.core.documents import DOCUMENTS, document_path
+    if key not in DOCUMENTS:
+        return jsonify({'error': 'Unknown document'}), 404
+    path, name = document_path(svc(), key, request.args.get('version', type=int))
+    if not os.path.exists(path):
+        return jsonify({'error': 'The file is missing on the server'}), 404
+    return send_file(path, mimetype='application/pdf', download_name=name, as_attachment=bool(request.args.get('download')))
 
 
 @bp.post('/admin/api/templates/<key>/activate')

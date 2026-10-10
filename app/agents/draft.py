@@ -375,7 +375,7 @@ class ProgramDraft:
         if t == 'single' and len(evs) > 1:
             out.append(_issue('program_type', 'Several events: Virasat or circuit may fit better', 'warning'))
         if not self.d['module'] and (not evs or any(not e.get('module') for e in evs)):
-            out.append(_issue('module', 'Module (Concert, Lecture Demonstration, Workshop, Baithak…)'))
+            out.append(_issue('module', 'Module (for example Full Concert, Lecture Demonstration or Workshops)'))
         for i, e in enumerate(evs):
             n = i + 1
             if not e.get('date'):

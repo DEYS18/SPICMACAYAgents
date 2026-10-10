@@ -44,9 +44,9 @@ class SubPathFallbackMiddleware:
         self.fallback_prefix = fallback_prefix.rstrip('/')
 
     def __call__(self, environ, start_response):
-        if self.fallback_prefix and not environ.get('SCRIPT_NAME'):
-            environ['SCRIPT_NAME'] = self.fallback_prefix
-        return self.wsgi_app(environ, start_response)
+        # URL_PREFIX if set; otherwise the original address IIS URL Rewrite and many proxies pass on (X-Original-URL)
+        from app.core.urls import SubPathMiddleware
+        return SubPathMiddleware(self.wsgi_app, self.fallback_prefix)(environ, start_response)
 
 
 def create_app(config=None):
@@ -81,7 +81,9 @@ def create_app(config=None):
     # Always visible on startup regardless of logging config — the fastest way to confirm
     # from the server console/log file whether URL_PREFIX was actually picked up.
     print(f"[SPIC MACAY] URL_PREFIX resolved to: {_url_prefix!r} "
-          f"({'sub-path fallback ACTIVE' if _url_prefix else 'none set — serving at domain root unless a proxy sends X-Forwarded-Prefix'})")
+          f"({'sub-path fallback ACTIVE' if _url_prefix else 'none set: the sub-path is detected from the proxy (X-Forwarded-Prefix or X-Original-URL), and pages use relative addresses otherwise'})")
+    from app.core import urls as _urls
+    _urls.install(app)                  # classic and new templates: addresses that work under any sub-path
 
     # ========================================
     # STEP 1: Load Configuration
@@ -385,12 +387,25 @@ def create_app(config=None):
     # ========================================
     # STEP 8: APR Assistant v2 (skills, governance, admin console)
     # ========================================
+    from app.core.version import APR_VERSION
     try:
         from app.assistant_setup import init_assistant
         init_assistant(app)
+        app.config['APR_ASSISTANT_STATUS'] = {'version': APR_VERSION, 'active': True}
         app.logger.info("  APR Assistant v2 ready at /assistant; admin console at /admin")
+        print(f"[SPIC MACAY] APR Assistant {APR_VERSION}: ACTIVE (assistant at /assistant, admin console at /admin, "
+              f"original screen at /assistant/classic)")
     except Exception as e:
+        reason = f'{type(e).__name__}: {e}'
+        app.config['APR_ASSISTANT_STATUS'] = {'version': APR_VERSION, 'active': False, 'error': reason}
         app.logger.error(f"APR Assistant v2 failed to start: {e}\n{traceback.format_exc()}")
+        print(f"[SPIC MACAY] APR Assistant {APR_VERSION}: NOT ACTIVE ({reason}). Usual fix: pip install -r requirements.txt, "
+              f"then restart. Details are in the log.")
+        try:
+            from app.assistant_setup import register_unavailable
+            register_unavailable(app, reason)
+        except Exception as e2:
+            app.logger.error(f"Could not register the diagnostic pages: {e2}")
 
     app.logger.info("=" * 60)
     app.logger.info("Application initialization complete!")
@@ -538,7 +553,7 @@ def register_routes(app):
 
     @app.route('/assistant/classic')
     def assistant_classic():
-        """The previous assistant, kept for comparison and fallback."""
+        """The original assistant and its screen (with the 2026 improvements), kept alongside the merged one."""
         return render_template('assistant_classic.html')
 
     @app.route('/guide/<agent_key>')
@@ -566,8 +581,11 @@ def register_routes(app):
     @app.route('/health')
     def health_check():
         """Health check endpoint"""
+        from app.core.version import APR_VERSION
         return {
             'status': 'healthy',
+            'version': APR_VERSION,
+            'apr_assistant': app.config.get('APR_ASSISTANT_STATUS') or {'version': APR_VERSION, 'active': False, 'error': 'not initialised'},
             'agent_initialized': hasattr(app, 'agent'),
             'db_connected': hasattr(app, 'db_manager'),
             'services': {

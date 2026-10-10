@@ -63,10 +63,14 @@ class Orchestrator:
             try:
                 res = llm.complete(client, model=model, system=system, messages=messages, tools=tools, temperature=temperature,
                                    effort=effort, user_key=user_key, api=api, extra_items=extra if responses else None)
-            except Exception:
-                logger.exception('AI call failed')
-                reply = "I couldn't reach the AI service just now. Your draft is saved; please try again in a moment."
+            except Exception as e:
+                kind, msg = llm.describe_ai_error(e)
+                logger.exception('AI call failed (%s)', kind)
+                llm.record_ai_result(self.s.gov, False, kind, msg)
+                reply = msg + (' Your draft is saved.' if kind in ('rate', 'network', 'other') else
+                               ' Your draft is saved, and tapping and editing it still work.')
                 break
+            llm.record_ai_result(self.s.gov, True)
             try:
                 self.s.gov.add_usage(model, *llm.usage_numbers(res.usage))
             except Exception:

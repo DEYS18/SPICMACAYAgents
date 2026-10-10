@@ -29,7 +29,8 @@ except Exception:
 
 # ── fpdf2 ──────────────────────────────────────────────────────────────────── #
 try:
-    from fpdf import FPDF
+    from app.core.pdf_text import safe_fpdf_class   # any name prints (curly quotes, dashes, Rs., accents)
+    FPDF = safe_fpdf_class()
     _HAS_FPDF = True
 except Exception:
     _HAS_FPDF = False

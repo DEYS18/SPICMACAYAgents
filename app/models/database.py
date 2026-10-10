@@ -294,6 +294,12 @@ class DatabaseValidator:
         matched, and relevance is scored on whichever form fits better. Matching only the
         stripped term made an artist's exact stored name return nothing.
         """
+        _d = getattr(self, 'directory', None)
+        if _d is not None:
+            from app.services import classic_bridge as _bridge
+            _r = _bridge.artists(_d, search_term)
+            if _r is not None:
+                return _r
         conn = None
         cursor = None
         try:
@@ -359,6 +365,12 @@ class DatabaseValidator:
     
     def search_institutions(self, search_term: str, state: Optional[str] = None) -> List[Dict]:
         """Search for institutions"""
+        _d = getattr(self, 'directory', None)
+        if _d is not None:
+            from app.services import classic_bridge as _bridge
+            _r = _bridge.institutions(_d, search_term, state)
+            if _r is not None:
+                return _r
         conn = None
         cursor = None
         try:
@@ -450,6 +462,12 @@ class DatabaseValidator:
         portal user accounts (users_field_data) and the contact person named on an
         institution record (institution_list.name_of_the_coordinator).
         """
+        _d = getattr(self, 'directory', None)
+        if _d is not None:
+            from app.services import classic_bridge as _bridge
+            _r = _bridge.coordinators(_d, search_term)
+            if _r is not None:
+                return _r
         term = (search_term or '').strip()
         if not term:
             return []

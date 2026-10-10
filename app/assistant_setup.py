@@ -3,7 +3,7 @@ from create_app) or a standalone/test app (create_assistant_app)."""
 import os
 import threading
 
-from flask import Flask, jsonify, redirect, render_template
+from flask import url_for, Flask, jsonify, redirect, render_template
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(APP_DIR)
@@ -12,7 +12,13 @@ LANGUAGES = [('auto', 'Auto'), ('en', 'English'), ('hi', 'हिन्दी'), 
              ('pa', 'ਪੰਜਾਬੀ'), ('or', 'ଓଡ଼ିଆ'), ('as', 'অসমীয়া'), ('ur', 'اردو')]
 
 
+def _install_urls(app):
+    from app.core import urls
+    urls.install(app)
+
+
 def register_assistant(app, services):
+    _install_urls(app)
     from app.core.auth import auth_mode, bp as auth_bp, current_user, is_admin, require_assistant
     from app.routes.admin import bp as admin_bp
     from app.routes.assistant_api import bp as api_bp
@@ -21,6 +27,7 @@ def register_assistant(app, services):
     app.register_blueprint(api_bp, url_prefix='/api/assistant')
     app.register_blueprint(admin_bp)
 
+    @app.route('/assistant/new')          # the earlier preview address still works
     @app.route('/assistant')
     @require_assistant
     def assistant_page():
@@ -50,6 +57,48 @@ def _legacy_report_hook(app, services):
     services.hooks['apr_created'].append(hook)
 
 
+_UNAVAILABLE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APR Assistant could not start</title><style>body{font:16px/1.55 system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 18px;color:#2b1d14}
+h1{color:#8B0000;font-weight:500}code,pre{background:#f6efe4;border-radius:6px;padding:2px 6px}pre{padding:10px;white-space:pre-wrap}</style></head><body>
+<h1>The new APR Assistant could not start</h1><p>The server is running version {version}, but the new assistant failed while starting:</p>
+<pre>{reason}</pre><p><strong>Usual fix:</strong> install the packages this version needs, in the same Python environment the server uses, then restart the app:</p>
+<pre>pip install -r requirements.txt</pre><p>On a Lilly-managed machine, install through Artifactory. The server log has the full details.</p>
+<p>Meanwhile the previous assistant still works: <a href="{classic}">open the previous assistant</a>.</p></body></html>"""
+
+
+def register_unavailable(app, reason):
+    """When the new assistant cannot start, /assistant and /admin say why, instead of "Not Found"."""
+    from html import escape
+    from app.core.version import APR_VERSION
+    taken = {r.rule for r in app.url_map.iter_rules()}
+
+    def page():
+        from app.core.urls import relative
+        html = (_UNAVAILABLE.replace('{version}', escape(APR_VERSION)).replace('{reason}', escape(reason))   # the page's CSS has braces
+                .replace('{classic}', escape(relative('/assistant/classic'))))
+        return html, 503, {'Content-Type': 'text/html; charset=utf-8'}
+    for rule, endpoint in (('/assistant/new', 'assistant_unavailable'), ('/admin', 'admin_unavailable')):
+        if rule not in taken:
+            app.add_url_rule(rule, endpoint, page)
+    if '/assistant' not in taken:                        # coordinators carry on with the original assistant meanwhile
+        from flask import redirect
+        from app.core.urls import relative
+        app.add_url_rule('/assistant', 'assistant_fallback', lambda: redirect(relative('/assistant/classic')))
+
+
+def _knowledge_answerer(app):
+    """The original assistant's information agent (WorkflowAgent), created on first use."""
+    holder = {}
+
+    def answer(question):
+        agent = getattr(getattr(app, 'agent', None), 'workflow_agent', None) or holder.get('agent')
+        if agent is None:
+            from app.models.workflow_agent import WorkflowAgent
+            agent = holder['agent'] = WorkflowAgent(api_key=app.config.get('OPENAI_API_KEY') or '')
+        return agent.run_workflow(question)
+    return answer if app.config.get('OPENAI_API_KEY') else None
+
+
 def init_assistant(app):
     from app.agents.services import build_services
     services = build_services(db=getattr(app, 'db_manager', None), event_service=getattr(app, 'event_service', None),
@@ -59,16 +108,22 @@ def init_assistant(app):
                               google_key=os.getenv('GOOGLE_API_KEY', ''), config=app.config)
     _legacy_report_hook(app, services)
     register_assistant(app, services)
+    from app.services import classic_bridge
+    classic_bridge.install(app, services)
+    services.knowledge = _knowledge_answerer(app)      # the original information agent, for questions about SPIC MACAY     # the original assistant gets the improved search and portal records
     return services
 
 
 def create_assistant_app(services, config=None):
     app = Flask('app', root_path=APP_DIR)
+    from app.core.urls import SubPathMiddleware
+    app.wsgi_app = SubPathMiddleware(app.wsgi_app, os.getenv('URL_PREFIX', ''))
     app.config.update(SECRET_KEY=os.getenv('SECRET_KEY', 'test-secret'), TESTING=True)
     app.config.update(config or {})
     register_assistant(app, services)
 
     @app.route('/')
     def root():
-        return redirect('/assistant')
+        from app.core.urls import relative
+        return redirect(relative(url_for('assistant_page')))
     return app

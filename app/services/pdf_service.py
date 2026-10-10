@@ -32,7 +32,8 @@ def generate_apr_pdf(apr_data: dict, event_data: dict, coordinator_data: dict = 
         PDF as bytes; empty bytes on failure.
     """
     try:
-        from fpdf import FPDF
+        from app.core.pdf_text import safe_fpdf_class   # any name prints (curly quotes, dashes, Rs., accents)
+        FPDF = safe_fpdf_class()
     except ImportError:
         logger.error("fpdf2 not installed — cannot generate APR PDF")
         return b''
@@ -251,7 +252,8 @@ def generate_payment_request_pdf(reminder_data: dict, event_data: dict, bank_con
         PDF as bytes; empty bytes on failure.
     """
     try:
-        from fpdf import FPDF
+        from app.core.pdf_text import safe_fpdf_class   # any name prints (curly quotes, dashes, Rs., accents)
+        FPDF = safe_fpdf_class()
     except ImportError:
         logger.error("fpdf2 not installed — cannot generate payment request PDF")
         return b''

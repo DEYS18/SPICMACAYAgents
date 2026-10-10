@@ -1,7 +1,7 @@
 /* SPIC MACAY APR Assistant: conversation, live program draft, tap-to-confirm cards, uploads and voice. */
 (() => {
   'use strict';
-  const BASE = document.body.dataset.base || '';
+  const BASE = window.APP_ROOT != null ? window.APP_ROOT : (document.body.dataset.base || '');
   const $ = (s, root = document) => root.querySelector(s);
   const el = (tag, attrs, ...kids) => {
     const n = document.createElement(tag);
@@ -62,8 +62,15 @@
   const timeText = (a, b) => a ? t12(a) + (b ? ' - ' + t12(b) : '') : '';
 
   function scrollEnd() { requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; }); }
+  function leaveWelcome() {
+    if (!document.body.classList.contains('is-empty')) return;
+    document.body.classList.remove('is-empty');
+    const w = $('#welcome');
+    if (w) w.remove();
+  }
   function addMsg(role, text) {
     if (!text) return null;
+    if (role === 'user') leaveWelcome();
     const n = el('div', { class: 'msg ' + role });
     if (role === 'assistant') n.innerHTML = md(text); else n.textContent = text;
     msgs.append(n);
@@ -90,7 +97,9 @@
     if (!r) return;
     if (r.reply) addMsg('assistant', r.reply);
     renderUI(r.ui || {});
-    renderChips(r.suggestions || []);
+    // A card with its own buttons (review, emails, batch plan) is the next step: no extra chips repeating it.
+    const actionable = ((r.ui || {}).cards || []).some(c => ['review', 'outbox', 'batch_plan', 'rfp_picker', 'bank_proposal', 'upload'].includes(c.type));
+    renderChips(actionable ? [] : (r.suggestions || []).slice(0, 3));
     if (r.draft) { S.draft = r.draft; S.issues = r.issues || []; S.progress = r.progress; renderDraft(); }
     if ((!opts || opts.speak !== false) && r.reply) speakReply(r.reply);
   }
@@ -384,6 +393,7 @@
     const pct = Math.round(100 * p.done / (p.total || 1));
     const o = d.outputs || {};
     $('#pill-ring').style.setProperty('--p', pct);
+    $('#draft-pill').hidden = !(d.program_type || d.main_artist || (d.events || []).length || (d.accompanying || []).length);
     $('#pill-ring b').textContent = p.done + '/' + p.total;
     $('#pill-text').textContent = [TYPE_LABEL[d.program_type] || 'New program', d.events.length ? d.events.length + ' event' + (d.events.length > 1 ? 's' : '') : '',
       o.apr ? 'APR ' + o.apr.number : ''].filter(Boolean).join(', ');
@@ -620,15 +630,45 @@
   }
 
   // ── boot ────────────────────────────────────────────────────────────────
-  function renderWelcome() {
-    const w = el('div', { class: 'welcome' });
-    S.recipes.forEach(rc => w.append(el('button', { type: 'button', onclick: () => startRecipe(rc) }, el('strong', {}, rc.label), el('span', {}, rc.hint))));
-    msgs.append(w);
+  function renderWelcome(w) {
+    msgs.append(el('section', { class: 'welcome', id: 'welcome' }, el('h2', {}, w.title || 'Namaste'), w.text ? el('p', {}, w.text) : null));
   }
-  function renderRecipes() {
-    const ul = $('#recipes');
-    ul.innerHTML = '';
-    S.recipes.forEach(rc => ul.append(el('li', {}, el('button', { type: 'button', onclick: () => startRecipe(rc) }, el('strong', {}, rc.label), el('span', {}, rc.hint)))));
+  // The original assistant greeted coordinators aloud as the screen opened. Browsers may keep a page silent until the
+  // first tap: then a small "Tap to hear the welcome" button appears, so the spoken welcome is never lost.
+  function speakWelcome(w) {
+    const text = w && (w.spoken || w.text);
+    if (!text || !S.voice || S.welcomeSpoken) return;
+    S.welcomeSpoken = true;
+    const lang = prefs.lang === 'auto' ? 'hi' : prefs.lang;
+    S.voice.speak(text, lang).catch(() => {});
+    setTimeout(() => {
+      const a = S.voice.audio, playing = (a && !a.paused && !a.ended) || ('speechSynthesis' in window && speechSynthesis.speaking);
+      if (playing || !document.body.classList.contains('is-empty')) return;
+      const b = el('button', { class: 'chip hear', type: 'button', id: 'hear-welcome', onclick: () => { b.remove(); S.voice.speak(text, lang).catch(() => {}); } },
+        '🔊 सुनिए · Tap to hear the welcome');
+      $('#chips').prepend(b);
+    }, 2200);
+  }
+  function setupSpeaker() {
+    const b = $('#btn-speaker'), box = $('#pref-tts');
+    if (!b || !box) return;
+    const sync = () => { b.setAttribute('aria-pressed', String(box.checked)); b.title = box.checked ? 'Replies are read aloud' : 'Read replies aloud'; };
+    b.addEventListener('click', () => { box.checked = !box.checked; box.dispatchEvent(new Event('change', { bubbles: true })); sync(); if (!box.checked && S.voice) S.voice.stopSpeaking(); });
+    box.addEventListener('change', sync);
+    sync();
+  }
+  function renderStarters() {
+    const box = $('#chips');
+    box.innerHTML = '';
+    (S.recipes || []).forEach(rc => box.append(el('button', { class: 'chip', type: 'button', onclick: () => {
+      if (rc.kind === 'attach') {
+        const b = document.querySelector('#attach-menu button[data-kind="' + (rc.attach || '') + '"]');
+        if (b) b.click();
+        return;
+      }
+      if (rc.kind === 'message' && rc.message) { send(rc.message); return; }
+      startRecipe(rc);
+    } }, rc.label)));
   }
   function renderRecent(list) {
     $('#recent-wrap').hidden = !list.length;
@@ -642,14 +682,16 @@
     S.aiReady = !!r.ai_ready; S.voiceCaps = r.voice || {}; S.recipes = r.recipes || [];
     $('#ai-status').hidden = S.aiReady;
     msgs.innerHTML = '';
-    if (r.history && r.history.length) r.history.forEach(m => addMsg(m.role, m.text));
-    else if (r.reply) { addMsg('assistant', r.reply); renderWelcome(); }
-    renderRecipes();
+    const fresh = !(r.history && r.history.length);
+    document.body.classList.toggle('is-empty', fresh);
+    if (!fresh) r.history.forEach(m => addMsg(m.role, m.text));
+    else { renderWelcome(r.welcome || { title: 'Namaste', text: r.reply || '' }); speakWelcome(r.welcome); }
     renderRecent(r.recent || []);
     renderTurn(Object.assign({}, r, { reply: null }), { speak: false });
+    if (fresh) renderStarters();
   }
   async function init() {
-    setupComposer(); setupMenu(); setupSheet(); setupDrop(); setupVoice();
+    setupComposer(); setupMenu(); setupSheet(); setupDrop(); setupVoice(); setupSpeaker();
     try { boot(await api('/start', { language: prefs.lang })); } catch (e) { toast(e.message); }
   }
   init();

@@ -185,14 +185,21 @@
                 <p>View program statistics and manage records.</p>
                 <span class="go">Open <i class="fas fa-arrow-right"></i></span>
             </a>
+            <!-- Admin console: templates (emails, APR and Request for Payment documents, guidelines, posters), settings, approvals -->
+            <a class="agent-card muted" href="./admin">
+                <div class="icon-wrap"><i class="fas fa-sliders-h"></i></div>
+                <h3>Admin Console</h3>
+                <p>Manage templates (emails, APR and Request for Payment documents, event guidelines, posters), settings, approvals and activity. For administrators.</p>
+                <span class="go">Sign in <i class="fas fa-arrow-right"></i></span>
+            </a>
         </div>
 
         <div class="footer-links">
             <a href="{{ url_for('api_documentation') }}" target="_blank"><i class="fas fa-code"></i> API</a>
             <a href="https://spicmacay.in" target="_blank"><i class="fas fa-external-link-alt"></i> spicmacay.in</a>
-            <a href="https://spicmacay.in" target="_blank"><i class="fas fa-external-link-alt"></i> spicmacay.in</a>
         </div>
         <p class="footer-note">SPIC MACAY &mdash; Spreading the heritage of India's classical arts since 1977</p>
+        <p class="footer-note">APR Assistant {{ apr_version }}</p>
     </div>
 
     <script>

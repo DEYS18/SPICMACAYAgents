@@ -119,7 +119,9 @@ def start():
     if body.get('language'):
         st.language = body['language']
     history = _visible_history(st)
-    payload = _payload(st, reply=None if history else prompts.greeting(st.language, s))
+    who = (assistant_user() or {}).get('name') or (u or {}).get('name')
+    payload = _payload(st, reply=None if history else prompts.greeting(st.language, s, name=who))
+    payload['welcome'] = prompts.welcome(st.language, name=who)
     if not history:
         st.history.append({'role': 'assistant', 'content': payload['reply']})
     au = assistant_user() or {}

@@ -30,13 +30,37 @@ The first start creates `instance/`: the governance database (templates with the
 | Windows | `python run.py` (uses waitress when `DEBUG` is not `true`) |
 | Linux | `gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 8 --timeout 120 run:app` |
 | Docker | `docker compose up -d --build` (keeps `./instance` and `./logs` on the host) |
-| Behind a proxy under a sub-path | set `URL_PREFIX=/spicmacay_ai_agent/New_AI_Portal`, or have the proxy send `X-Forwarded-Prefix` |
+| Behind a proxy under a sub-path | Works without settings. The app takes the sub-path from `X-Forwarded-Prefix` or from IIS's `X-Original-URL`, and otherwise uses addresses relative to each page. Setting `URL_PREFIX=/spicmacay_ai_agent/New_AI_Portal` is still recommended, so links in emails are complete |
 
 Use **one worker process**: the weekly-report scheduler and the classic assistant keep state per process. (The new assistant keeps its state in `instance/governance.db`, so it would be fine with more.)
 
 **Serve the site over HTTPS.** Browsers only allow the microphone on `https://` or `localhost`; once on HTTPS also set `SESSION_COOKIE_SECURE=true`.
 
 **Convention and Movement guides:** copy your existing `knowledge_index/` folder into the project root. It is not in this zip (142 MB).
+
+## Troubleshooting
+
+**The screens look exactly as before (no new assistant, no admin console).** The server is still running the previous version. The most common cause is the package unzipped *inside* the old folder, so the old files keep running.
+
+1. Check the startup line `APR Assistant 2.0.0 ...: ACTIVE`, or open `<your address>/health`.
+2. Follow `docs/UPGRADE.md`.
+3. Run `python e2e_check.py --url <your address>` to confirm which version the live site serves.
+
+
+**"Refused to execute script ... MIME type ('text/html')" and "startWithMessage is not defined".** The page asked for its scripts at the site root (`https://spicmacay.in/static/...`) instead of under the app's sub-path, and the main website answered with an HTML page.
+
+- **This version:** works under a sub-path without any setting.
+- **Previous version, or an immediate fix:** set `URL_PREFIX` in `.env` to the part of the address before `/assistant` (for example `URL_PREFIX=/spicmacay_ai_agent/New_AI_Portal`), then restart. The startup line `[SPIC MACAY] URL_PREFIX resolved to: ...` shows what the app picked up.
+
+**"Your API key has been invalidated" (`token_invalidated`, error 401).** OpenAI no longer accepts the key in `.env`: it was revoked, by someone in the OpenAI account or automatically by OpenAI.
+
+1. Create a new secret key at platform.openai.com > API keys.
+2. Put it in `OPENAI_API_KEY` in the server's `.env` and restart the app.
+3. Confirm it with Admin > Overview > "Check the AI key now", or with `python e2e_check.py`.
+
+The same check reports other problems: an empty balance, a model the key may not use, or a network block. Both assistants now say which problem it is instead of showing the raw error.
+
+After upgrading, reload once with Ctrl+F5. Static files carry a version from then on, so browsers never keep stale scripts. If a file still fails to load, a red banner at the bottom of the page names it.
 
 ## Configuration
 
@@ -57,21 +81,54 @@ Behaviour (default audience, finance CC list, bank details, signatory, photo rul
 
 ## Using the assistant
 
-- **Speak:** tap the mic and talk; it stops by itself when you pause. Hold it for push-to-talk, or press Alt+V on a keyboard. Pick the language at the top. The menu has: read replies aloud, hands-free (it listens again after each reply; say "bas" or "stop" to end), and check voice text before sending.
-- **Tap to confirm:** when a name could mean several artists, institutions or campuses, cards appear; tap the right one.
-- **The draft:** on a laptop it is on the right; on a phone tap "Details". Everything collected so far is there; tap any value to change it.
-- **Attach (+):** a program poster (all its details are read into the draft), the main artist's photo, a circuit list (CSV or Excel), a cancelled cheque, program photos. On a laptop you can drag files onto the page.
-- **Share:** APRs, invoices and posters have Share (WhatsApp and the like) and Download buttons.
-- **Several posters at once:** for APRs you didn't file after each program, choose **+ > Several posters at once** (or drag up to 20 posters onto the page). The assistant:
-  - reads them all;
-  - merges events that appear on two posters;
-  - groups the events into programs (Virasat, circuit or single);
-  - leaves out what is already in the portal or needs no APR (such as a film screening);
-  - shows one plan to check, where you tick what to file and fix anything marked by tapping.
+**The assistant (`/assistant`) combines the calm, conversation-first screen with the original assistant's know-how.**
 
-  **File** then files every ticked program and emails each APR to the coordinators, or all of them in one email. Finally you choose which institutions get a Request for Payment, and how much. See `docs/REAL_POSTER_TEST.md` for a run with ten real posters.
+**Its brain is the original SPIC MACAY assistant's playbook,** read word for word from `app/models/agent.py`:
+- terminology, language and the conversation flow;
+- the 300-attendee default, city and state best guesses, and coordinator email lookups;
+- new artists and institutions, accompanying artists, photos, bank details;
+- payment reminders, posters, and single, circuit and Virasat programs.
+
+It drives this version's tools: better search, any date format, review cards, email previews, the batch flow, web look-ups, cheque reading and the portal's own APR records. A short section after the playbook explains how to carry it out with these tools. Questions about SPIC MACAY itself go to the original information agent, which reads the movement's own documents.
+
+**Nothing is asked up front.** The welcome (in Hindi first, as before) is spoken as the screen opens; if the browser keeps the page silent, a *सुनिए · Tap to hear the welcome* button appears. Then the coordinator speaks, types or uploads a poster, and the assistant works out what they need:
+- the APR, the Request for Payment, the pre-event guidelines or a poster;
+- one at a time or together;
+- for a new program or one already filed.
+
+The next step appears as a small button only once it applies: after filing, *Make a poster · Send Request for Payment · Send pre-event guidelines*.
+
+**Around the conversation:**
+- **Quiet starters** under the message box: Upload a poster, Several posters at once, Pending payments, Upcoming programs, About SPIC MACAY.
+- **The message box:** attach (+), the **speaker** (gold when replies are read aloud) and the mic.
+- **The Details pill:** a progress ring and drawer.
+- **Cards for choices:** tappable choices when names are close, the summary card with **File APR** and **Preview PDF**, a preview of every email with tick boxes.
+
+**Several posters at once** reads up to 20 posters and files their APRs together (see `docs/REAL_POSTER_TEST.md`). The original screen stays available at `/assistant/classic`; it uses the same improved services underneath (`app/services/classic_bridge.py`).
 
 ## Admin console
+
+### Governing the templates (Admin > Templates)
+
+Reach the console from the portal's home page (**Management > Admin Console**), from the assistant's menu, or at `<your address>/admin`. It opens once `ADMIN_PASSWORD` or `ADMIN_EMAILS` is set in `.env`.
+
+Every document and email the assistant produces is a governed template, grouped by what it is for:
+
+| Group | Templates |
+|---|---|
+| **APR** | the APR PDF layouts for a single program, a circuit and a Virasat; the "APR filed" email; the several-APRs summary |
+| **Request for Payment** | the email to the institution and the invoice document |
+| **Event guidelines** | the guidelines email, and the guidelines document itself (the SOP and checklist PDF) |
+| **Posters** | wording and options |
+| **Other emails** | the email frame, the artist's thank-you, the Artist Care Group notice, coordinator requests, sign-in codes |
+| **Assistant** | the house rules |
+
+How editing works:
+- **Every save is a new version.** Earlier versions stay in History and can be switched back on in one click; **Reset to default** brings back the original.
+- **Edits are checked first.** Emails and layouts are previewed with sample data and test-rendered before saving, and **Send me a test** emails the saved version.
+- **The major parts are protected.** If an edit leaves out something the original relies on (the APR number, an amount, the institution's name), saving stops and lists it: put it back, or confirm deliberately. Wording changes save straight away.
+- **The guidelines document is versioned.** Upload a revised PDF as a new version; both assistants attach whichever version is active, and the original stays one click away. Uploaded versions are kept in `instance/documents/`: back it up with the rest of `instance/`.
+
 
 Sign in at `/admin` with `ADMIN_PASSWORD`, or as a coordinator listed in `ADMIN_EMAILS`.
 
@@ -97,7 +154,7 @@ python -m unittest discover -s tests -v     # or: pytest tests
 SPICMACAY_TEST_DB="user:password@127.0.0.1:3306/drupal" SPICMACAY_TEST_DB_IS_A_COPY=yes python -m unittest tests.test_mariadb_integration -v
 ```
 
-75 tests (including the ten real posters in `tests/test_real_posters.py`) run against an in-memory copy of the portal schema with a scripted AI, so no database, API key or network is needed.
+117 tests (including the ten real posters in `tests/test_real_posters.py`) run against an in-memory copy of the portal schema with a scripted AI, so no database, API key or network is needed.
 
 ## Where things are
 

@@ -51,7 +51,8 @@ def require_assistant(f):
         if assistant_user() is None:
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Please sign in first.', 'login_url': url_for('auth.login')}), 401
-            return redirect(url_for('auth.login', next=request.path))
+            from app.core.urls import relative
+            return redirect(relative(url_for('auth.login', next=request.path)))
         return f(*a, **k)
     return wrapper
 
@@ -130,4 +131,5 @@ def admin_login():
 @bp.get('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('auth.login'))
+    from app.core.urls import relative
+    return redirect(relative(url_for('auth.login')))

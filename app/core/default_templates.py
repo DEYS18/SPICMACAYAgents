@@ -163,9 +163,9 @@ APR_BATCH = """{% extends "email.shell" %}{% block content %}
 <p class="note">Filed through the {{ org.name }} APR Assistant.</p>
 {% endblock %}"""
 
-HOUSE_RULES = """- Many coordinators are volunteers; be respectful, patient and brief.
+HOUSE_RULES = """- Many coordinators are volunteers: be warm, respectful and patient, like a helpful colleague.
 - Say "program" for the whole booking and "event" for each session within it.
-- Keep each reply short enough to read on a phone screen.
+- Keep each reply short enough to read comfortably on a phone screen.
 - When something is optional (photos, bank details, accompanying artists), mention it once and move on."""
 
 
@@ -334,3 +334,14 @@ def sample_context(org: dict, kind: str = 'circuit') -> dict:
                  'account_number': '10773571902', 'ifsc': 'SBIN0011781'},
         'signatory': {'name': 'Sabyasachi Dey', 'title': 'National Coordinator'},
     }
+
+
+# Earlier default wordings: when the stored template is still exactly one of these (nobody edited it), the
+# current default replaces it as a new version on startup. An administrator's own wording is never touched.
+SUPERSEDED_DEFAULTS = {'prompt.house_rules': [""" + repr(old_rules) + """]}
+
+
+DEFAULT_TEMPLATES['doc.event_guidelines'] = {
+    'kind': 'document', 'title': 'Pre-event guidelines document (PDF)', 'body': '',
+    'meta': {'file': '', 'help': 'The SOP and pre-programme checklist attached to the pre-event guidelines email. Upload a '
+                                 'revised PDF to replace it; earlier versions and the original stay available.'}}

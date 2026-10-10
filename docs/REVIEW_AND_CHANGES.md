@@ -124,10 +124,75 @@ OpenAI calls now go through one model-aware layer. For the model assessment and 
 
 A regression test against a production dump (MariaDB 10.11.14, March 2026) showed how the portal itself records an APR, and the assistant now does the same. The APR is a `custom_apr` record, and its id is the APR number the portal shows (the next after 207 in that dump). It carries the event ids, the coordinators' user ids, the program type (Circuit 288, Single Event 289, Viraasat Series 291) and the program group. Multi-event programs are `event_series` records. Events store institutions by name and are linked to their program through `added_from`. Previously the assistant wrote only the earlier AI app's `apr_payment_request` rows, which the portal never reads, and numbered APRs from a table whose highest number was 16. No database changes are needed. See `docs/DATABASE_COMPATIBILITY.md`.
 
+## 8d. Conversation first (after the first deployment)
+
+The first version of the new screen had a left panel of start buttons and a permanent right-hand form, and the AI's instructions read like a procedure ("ask one short question per reply, in this order"). Together they made the assistant feel like a web form. The coordinators' feedback was that the chat is the point, and both have changed:
+- **The screen:** one centred conversation with a personal greeting and five quiet suggestions under the message box. Details sit behind a small pill and open as a drawer.
+- **No duplicates:** suggestions never repeat a card's own buttons, and the microphone's ring appears only while listening.
+- **The instructions:** they describe a warm, knowledgeable colleague, who takes the story in any order, asks only what is missing (naturally, never as a list), answers questions and offers at most one next step.
+- **Unchanged:** every rule about confirmation, filing and sending, and every capability. All 13 abilities of the previous assistant have counterparts among the 41 tools.
+
+The administrators' house rules default moved to "warm, respectful and patient"; the stored default is upgraded only if nobody has edited it.
+
+## 8e. The original assistant is the main assistant again
+
+Coordinators preferred the original conversational agent: its flow, its Hindi welcome spoken as the screen opens, and its screen. It is the main assistant again, at `/assistant`, and its conversation logic and instructions are unchanged.
+
+The improvements sit underneath, at the two services it calls (`app/services/classic_bridge.py`):
+- better directory search, returning the same fields with notes for the reviewer's points;
+- any date format;
+- the portal's own APR and program records, alongside the old rows;
+- provisional new artists;
+- a short addendum after its instructions.
+
+Each falls back to the original behaviour if anything goes wrong. Verified end to end on the production copy, through the HTTP chat and the original agent:
+- a single program filed as APR 208, with a Hindi title and the ₹ sign stored safely and the date given as "15 Nov 2026";
+- a circuit filed as APR 209, with its program record and both stops linked.
+
+The screen keeps all its features and takes the SPIC MACAY colours. The spoken welcome falls back to a "Tap to hear" button when a browser blocks autoplay, and the voice status no longer sticks on "Generating speech" when speech fails. The newer interface remains at `/assistant/new` as a preview.
+
+## 8f. Each output on its own or together (original assistant)
+
+Verified on the production copy, through the original agent, with every email captured:
+- a Request for Payment on its own for a program already filed;
+- the APR, its Request for Payment and the guidelines in one conversation;
+- a poster on its own for a filed program;
+- the guidelines on their own in a fresh conversation.
+
+Fixed on the way:
+- **Empty PDFs.** The Request for Payment invoice and the APR PDF came out empty, and emails went without attachments, whenever a name had a curly apostrophe ("St. Xavier’s"), a dash, an accent or the rupee sign. fpdf's Helvetica cannot print them; `app/core/pdf_text.py` makes such text printable, so the documents keep their look.
+- **Posters for a filed program** looked the artist up by name, so a namesake's photo could be used (the directory has two "Ronu Majumdar" records). They now use the program's own artist, and a shared name never counts as a confident match.
+- **"Send the pre-event guidelines" opening a conversation** went to the information agent. The router now knows guideline, pre-event, SOP, checklist and invoice.
+
+The welcome screen gains **What do you need today?**, which starts one conversation for any combination of outputs, plus a Guidelines quick action and a link to the step-by-step view.
+
+## 8g. One assistant: the calm screen, the original playbook, the newer tools
+
+The assistant at `/assistant` is now one merged assistant:
+- **Screen and tools:** the conversation-first screen and this version's tools, cards and buttons.
+- **Instructions:** the original assistant's playbook, read word for word from `agent.py` at start-up (setting `assistant.original_playbook`). It is followed by a short section on carrying it out here: intent first, then a mapping of the 13 original tools to their newer equivalents.
+- **Welcome:** in the original's Hindi-first style, spoken as the screen opens, asking nothing.
+- **Follow-ups:** program-type and next-output buttons appear only once they apply.
+- **Knowledge:** a new skill, `ask_spicmacay_guide`, connects the original information agent (WorkflowAgent) for questions about SPIC MACAY.
+- **Speaker:** a speaker toggle sits next to the mic.
+
+The original screen remains at `/assistant/classic`. If the merged assistant cannot start, `/assistant` sends coordinators there.
+
+## 8h. Template governance
+
+Admin > Templates now groups the templates by purpose (APR, Request for Payment, Event guidelines, Posters, Other emails, Assistant) and adds two things:
+- **The pre-event guidelines document** is governed like the templates: a revised PDF is uploaded as a new version, every version is kept, any can be switched back on, and the original ships with the app. Both assistants attach the active version.
+- **Edits that drop a placeholder the original relies on** (the APR number, an amount, the institution's name) are stopped with a list of what is missing, unless confirmed. Wording changes save straight away.
+
+Everything else was already in place:
+- the visual editors for the APR and Request for Payment layouts;
+- the live previews, test emails and history;
+- reset to default, and the sandboxed test render before every save.
+
 ## 9. Testing: what was and was not verified
 
 **Verified here:**
-- 75 automated tests, plus a MariaDB integration test and a check with the previous version's own code run against the production dump: batch filing with ten real posters, one row per day, the OpenAI layer for GPT-4o, GPT-5.x and GPT-6 (Responses API), and the end-to-end script offline against an in-memory copy of the portal schema with a scripted AI.
+- 116 automated tests, plus a MariaDB integration test and a check with the previous version's own code run against the production dump: batch filing with ten real posters, one row per day, the OpenAI layer for GPT-4o, GPT-5.x and GPT-6 (Responses API), and the end-to-end script offline against an in-memory copy of the portal schema with a scripted AI.
 - The real application factory booting with all legacy parts: 72 routes and every page returning 200.
 - Chromium screenshots on a phone (390×844) and a laptop (1440×900) through a full circuit conversation, plus the admin console. These found and fixed three interface issues.
 

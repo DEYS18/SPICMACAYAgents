@@ -2,7 +2,7 @@
    approvals, directory flags and the activity log. */
 (() => {
   'use strict';
-  const BASE = document.body.dataset.base || '';
+  const BASE = window.APP_ROOT != null ? window.APP_ROOT : (document.body.dataset.base || '');
   const $ = (s, r = document) => r.querySelector(s);
   const el = (tag, attrs, ...kids) => {
     const n = document.createElement(tag);
@@ -31,16 +31,21 @@
 
   // ── Overview ────────────────────────────────────────────────────────────
   async function overview() {
-    const r = await api('/overview'), st = r.status;
+    const r = await api('/overview'), st = r.status, h = r.ai_health;
+    const failing = h && h.ok === false;
     const rows = [
-      ['AI assistant', st.ai, st.ai ? 'Connected' : 'OPENAI_API_KEY is not set: chat, voice and image reading are off'],
+      ['AI assistant', st.ai && !failing, !st.ai ? 'OPENAI_API_KEY is not set: chat, voice and image reading are off'
+        : failing ? 'Last AI call failed (' + when(h.at) + '): ' + h.message : 'Key set' + (h && h.ok ? '; it worked at ' + when(h.at) : '')],
       ['Email', st.email && !st.email_dry_run, st.email ? (st.email_dry_run ? 'Configured, but dry run is on: emails are saved, not sent' : 'Sending') : 'SMTP is not configured: emails are saved under instance/outbox'],
       ['Voice', st.voice, st.voice ? 'Server speech recognition and voice are on' : 'Browser speech only'],
       ['Google lookups', st.google, st.google ? 'GOOGLE_API_KEY is set' : 'Using Wikipedia, Wikidata and OpenStreetMap only'],
       ['Portal database', st.database, st.database ? 'Connected' : 'Not connected: filing is disabled'],
       ['Sign-in', st.auth_mode === 'email_otp', st.auth_mode === 'email_otp' ? 'Coordinators sign in with an emailed code' : 'Open: anyone with the link can use the assistant']];
-    main.append(el('h2', {}, 'Overview'),
+    main.append(el('h2', {}, 'Overview'), el('p', { class: 'muted' }, 'APR Assistant ' + (r.version || '')),
       el('ul', { class: 'status-list' }, rows.map(([k, ok, v]) => el('li', {}, el('span', { class: 'dot' + (ok ? '' : ' off') }), el('strong', {}, k), el('span', {}, v)))),
+      el('p', {}, el('button', { class: 'btn ghost small', type: 'button', onclick: guard(async () => {
+        const res = await api('/ai-check', {}); toast(res.message); main.innerHTML = ''; overview();
+      }) }, 'Check the AI key now')),
       el('h3', {}, 'Waiting for approval'),
       el('p', {}, el('span', { class: 'count' }, String(r.pending_approvals)), ' ', el('a', { href: '#approvals', onclick: () => go('approvals') }, 'Review approvals')),
       el('h3', {}, 'Skills'),
@@ -52,15 +57,25 @@
   }
 
   // ── Templates ───────────────────────────────────────────────────────────
-  const GROUPS = { email: 'Emails', email_layout: 'Emails', apr_layout: 'Documents', rfp_layout: 'Documents', poster_style: 'Poster', prompt: 'Assistant' };
+  const GROUP_ORDER = ['APR', 'Request for Payment', 'Event guidelines', 'Posters', 'Other emails', 'Assistant'];
+  function groupOf(t) {                       // grouped by what they are for, as coordinators think of them
+    const k = t.key;
+    if (k === 'email.apr_confirmation' || k === 'email.apr_batch_summary' || k.startsWith('layout.apr')) return 'APR';
+    if (k === 'email.payment_request' || k === 'layout.rfp') return 'Request for Payment';
+    if (k === 'email.pre_event_guidelines' || k === 'doc.event_guidelines') return 'Event guidelines';
+    if (k === 'layout.poster') return 'Posters';
+    if (t.kind === 'prompt') return 'Assistant';
+    return 'Other emails';
+  }
   let current = null;
   async function templates() {
     const { templates: list } = await api('/templates');
     const nav = el('div', { class: 'tpl-list' });
     const editor = el('div', { id: 'tpl-editor' }, el('p', { class: 'lead' }, 'Choose a template. Every save is a new version, and any earlier version can be switched back on.'));
     let lastGroup = null;
+    list.sort((a, b) => GROUP_ORDER.indexOf(groupOf(a)) - GROUP_ORDER.indexOf(groupOf(b)));
     list.forEach(t => {
-      const g = GROUPS[t.kind] || 'Other';
+      const g = groupOf(t);
       if (g !== lastGroup) { nav.append(el('h4', {}, g)); lastGroup = g; }
       nav.append(el('button', { type: 'button', 'data-key': t.key, onclick: () => openTemplate(t.key) }, t.title || t.key, el('small', {}, 'Version ' + t.version + (t.versions > 1 ? ' of ' + t.versions : ''))));
     });
@@ -73,6 +88,7 @@
     const t = r.template;
     history.replaceState(null, '', '#templates:' + encodeURIComponent(key));
     document.querySelectorAll('.tpl-list button').forEach(b => b.setAttribute('aria-current', String(b.dataset.key === key)));
+    if (t.kind === 'document') { renderDocument(key, r); return; }
     current = { key, kind: t.kind, obj: null };
     const box = $('#tpl-editor');
     box.innerHTML = '';
@@ -107,7 +123,14 @@
     }
     const doPreview = guard(async () => { await preview(key, { body: getBody(), subject: getSubject(), text: getText() }, pv); });
     const save = guard(async () => {
-      const res = await api('/templates/' + encodeURIComponent(key), { body: getBody(), subject: getSubject(), text: getText(), note: note.value });
+      const payload = { body: getBody(), subject: getSubject(), text: getText(), note: note.value };
+      let res = await saveTemplate(key, payload);
+      if (res.missing) {                       // the major parts: never lost by accident
+        const ok = confirm('This version leaves out parts the original template relies on:\n\n' +
+          res.missing.map(m => '  \u2022 {{ ' + m + ' }}').join('\n') + '\n\nPress Cancel to put them back, or OK to save anyway.');
+        if (!ok) return;
+        res = await saveTemplate(key, Object.assign(payload, { confirm_missing: true }));
+      }
       toast('Saved as version ' + res.version + (res.undeclared && res.undeclared.length ? '. Placeholders used: ' + res.undeclared.join(', ') : ''));
       openTemplate(key);
     });
@@ -132,6 +155,49 @@
     box.append(el('h3', { style: 'margin-top:0' }, t.title || key), el('p', { class: 'muted' }, key + ', version ' + t.version),
       el('div', { class: 'split' }, el('div', {}, form, actions, extras), pv), el('h3', {}, 'History'), versions);
     doPreview();
+  }
+  async function saveTemplate(key, payload) {
+    const res = await fetch(BASE + '/admin/api/templates/' + encodeURIComponent(key), { method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 409 && data.missing) return { missing: data.missing };
+    if (!res.ok) throw new Error((data.error || 'Save failed (' + res.status + ')') + (data.line ? ' (line ' + data.line + ')' : ''));
+    return data;
+  }
+  function renderDocument(key, r) {
+    const t = r.template, m = t.meta || {}, box = $('#tpl-editor');
+    box.innerHTML = '';
+    const fileUrl = (v, dl) => BASE + '/admin/api/documents/' + encodeURIComponent(key) + '/file?' + (v ? 'version=' + v + '&' : '') + (dl ? 'download=1' : '');
+    const input = el('input', { type: 'file', accept: 'application/pdf,.pdf', 'aria-label': 'Revised version (PDF)' });
+    const note = el('input', { type: 'text', placeholder: 'What changed? (optional)', 'aria-label': 'Change note' });
+    const upload = guard(async () => {
+      if (!input.files.length) { toast('Choose a PDF first.'); return; }
+      const fd = new FormData(); fd.append('file', input.files[0]); fd.append('note', note.value);
+      const res = await fetch(BASE + '/admin/api/documents/' + encodeURIComponent(key), { method: 'POST', body: fd, credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      toast('Uploaded as version ' + data.version + '. It is attached from now on.'); openTemplate(key);
+    });
+    const pv = el('div', { class: 'preview' }, el('div', { class: 'bar' }, 'The active version'),
+      el('iframe', { src: fileUrl(), title: 'The active document', style: 'width:100%;height:540px;border:0;background:#fff' }));
+    const versions = el('ul', { class: 'versions' }, r.history.map(h => el('li', {}, el('strong', {}, 'Version ' + h.version),
+      el('span', {}, [h.created_by, when(h.created_at), h.note].filter(Boolean).join(', ')),
+      el('a', { class: 'btn ghost small', href: fileUrl(h.version), target: '_blank', rel: 'noopener' }, 'Open'),
+      h.active ? el('em', {}, 'Active') : el('button', { class: 'btn ghost small', type: 'button', onclick: guard(async () => {
+        await api('/templates/' + encodeURIComponent(key) + '/activate', { version: h.version }); toast('Version ' + h.version + ' is attached again.'); openTemplate(key);
+      }) }, 'Switch back to this'))));
+    const current = m.file ? (m.original_name || 'Uploaded PDF') + (m.size ? ', ' + Math.round(m.size / 1024) + ' KB' : '') : 'The original document that ships with the app';
+    box.append(el('h3', { style: 'margin-top:0' }, t.title || key), el('p', { class: 'muted' }, (m.help || '') + ' Version ' + t.version + '.'),
+      el('div', { class: 'split' }, el('div', { class: 'stack' },
+        el('p', {}, el('strong', {}, 'Attached now: '), current),
+        el('a', { class: 'btn ghost', href: fileUrl(null, true) }, 'Download the active version'),
+        el('label', {}, 'Upload a revised version (PDF, up to 15 MB)', input), note,
+        el('div', { class: 'row' }, el('button', { class: 'btn primary', type: 'button', onclick: upload }, 'Upload as new version'),
+          r.has_default ? el('button', { class: 'btn ghost small', type: 'button', onclick: guard(async () => {
+            if (!confirm('Go back to the original document? The current version stays in the history.')) return;
+            await api('/templates/' + encodeURIComponent(key) + '/reset', {}); toast('The original document is attached again.'); openTemplate(key);
+          }) }, 'Back to the original') : null)),
+        pv), el('h3', {}, 'History'), versions);
   }
   function insertAt(ta, text) {
     const s = ta.selectionStart ?? ta.value.length, e = ta.selectionEnd ?? ta.value.length;

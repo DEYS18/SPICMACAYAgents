@@ -248,7 +248,7 @@
 
     <script>
         const AGENT_KEY = "{{ agent.key }}";
-        const APP_ROOT = "{{ request.script_root }}";
+        const APP_ROOT = {{ app_root_js() }};
         const API = APP_ROOT + "/api/knowledge/" + AGENT_KEY;
         const AVATAR_URL = "{{ avatar_url }}";
         const messagesEl = document.getElementById('messages');

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta charset="utf-8"><script>window.APP_ROOT = {{ app_root_js() }};</script>{{ asset_guard }}<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Admin console | SPIC MACAY APR Assistant</title>
 <link rel="icon" href="{{ url_for('static', filename='img/spicmacay-logo.svg') }}">
 <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;600;700&family=Tiro+Devanagari+Hindi&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -71,8 +71,8 @@
 <header class="admin-top">
   <img src="{{ url_for('static', filename='img/brand/spicmacay_wordmark.png') }}" alt="SPIC MACAY" style="height:30px">
   <h1>Admin console</h1>
-  <a href="{{ request.script_root }}/assistant">Open the assistant</a>
-  <a href="{{ request.script_root }}/logout">Sign out</a>
+  <a href="{{ app_root() }}assistant">Open the assistant</a>
+  <a href="{{ app_root() }}logout">Sign out</a>
 </header>
 <nav class="tabs" role="tablist" aria-label="Admin sections">
   <button role="tab" data-tab="overview">Overview</button>

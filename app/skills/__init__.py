@@ -7,8 +7,9 @@ def build_registry():
     from app.skills.output_skills import (AprSkill, BankSkill, DocumentsSkill, GuidelinesSkill, LookupsSkill,
                                           OutboxSkill, PaymentsSkill, PostersSkill)
     from app.skills.batch import BatchSkill
+    from app.skills.knowledge import KnowledgeSkill
     reg = SkillRegistry()
     for cls in (ProgramSkill, EventsSkill, ArtistsSkill, InstitutionsSkill, CoordinatorsSkill, AprSkill, DocumentsSkill,
-                PaymentsSkill, GuidelinesSkill, OutboxSkill, PostersSkill, BankSkill, LookupsSkill, BatchSkill):
+                PaymentsSkill, GuidelinesSkill, OutboxSkill, PostersSkill, BankSkill, LookupsSkill, BatchSkill, KnowledgeSkill):
         reg.register(cls())
     return reg

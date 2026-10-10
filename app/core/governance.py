@@ -298,6 +298,15 @@ class Governance:
             if not self._q('SELECT 1 FROM template_active WHERE key=?', (key,), one=True):
                 self.save_template(key, t['body'], kind=t['kind'], title=t.get('title'), subject=t.get('subject'),
                                    meta=t.get('meta') or {}, actor='system', note='Default', activate=True)
+        try:                                        # earlier default wordings nobody edited move to the current default
+            from app.core.default_templates import SUPERSEDED_DEFAULTS
+        except ImportError:
+            SUPERSEDED_DEFAULTS = {}
+        for key, olds in SUPERSEDED_DEFAULTS.items():
+            cur, new = self.get_template(key), defaults.get(key)
+            if cur and new and cur.get('body', '').strip() in [o.strip() for o in olds] and cur['body'].strip() != new['body'].strip():
+                self.save_template(key, new['body'], kind=new['kind'], title=new.get('title'), subject=new.get('subject'),
+                                   meta=new.get('meta') or {}, actor='system', note='Updated default', activate=True)
 
     # ── audit ────────────────────────────────────────────────────────────────
     def audit(self, actor, action, target='', details=None):

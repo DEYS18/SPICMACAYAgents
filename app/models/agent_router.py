@@ -148,6 +148,14 @@ class AgentRouter:
             'contribution payment',
             'request for payment',
             'send payment',
+            # Pre-event guidelines and invoices (added 2026), so they can be asked for on their own too
+            'guideline',
+            'pre-event',
+            'pre event',
+            'sop',
+            'checklist',
+            'invoice',
+            'payment request',
         ]
         
         is_event = any(keyword in query for keyword in event_keywords)

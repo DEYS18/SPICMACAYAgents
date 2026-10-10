@@ -635,15 +635,23 @@ class UnifiedChatInterface extends ChatInterface {
                 this.currentAudio.onerror = (error) => {
                     console.error('[Voice] Playback error:', error);
                     if (this.speakerBtn) this.speakerBtn.classList.remove('speaking');
+                    this._resetVoiceStatus();
                 };
                 
                 await this.currentAudio.play();
+            } else {
+                this._resetVoiceStatus();          // no audio came back: don't leave "Generating speech..." showing
             }
             
         } catch (error) {
             console.error('[Voice] TTS error:', error);
             if (this.speakerBtn) this.speakerBtn.classList.remove('speaking');
+            this._resetVoiceStatus();
         }
+    }
+
+    _resetVoiceStatus() {
+        if (typeof this.updateMicrophoneStatus === 'function') this.updateMicrophoneStatus('Click microphone to speak', 'Powered by OpenAI Whisper');
     }
     
     // sendMessage() is inherited from ChatInterface (poster upload, event photos, and
@@ -668,7 +676,29 @@ class UnifiedChatInterface extends ChatInterface {
             } catch (e) {
                 console.log('[Voice] Autoplay of opening greeting was blocked by the browser:', e);
             }
+            // If the browser kept it silent, offer the welcome with one tap so every coordinator still hears it.
+            setTimeout(() => {
+                const a = this.currentAudio;
+                if (!(a && !a.paused && !a.ended)) this._offerWelcomeAudio(data.response);
+            }, 1800);
         }
+    }
+
+    _offerWelcomeAudio(text) {
+        if (this._welcomeOffered || document.getElementById('hear-welcome')) return;
+        this._welcomeOffered = true;
+        const b = document.createElement('button');
+        b.id = 'hear-welcome'; b.type = 'button'; b.className = 'hear-welcome';
+        b.setAttribute('aria-label', 'Hear the welcome');
+        b.innerHTML = '<i class="fas fa-volume-up" aria-hidden="true"></i> सुनिए &middot; Tap to hear the welcome';
+        b.addEventListener('click', async () => {
+            b.remove();
+            try { await this.speakText(text, /* force */ true); } catch (e) { console.log('[Voice] Welcome could not be played:', e); }
+        });
+        const where = document.querySelector('.voice-controls') || document.body;          // its own row under the voice controls
+        where.appendChild(b);
+        const input = document.getElementById('user-input');
+        if (input) input.addEventListener('keydown', () => b.remove(), { once: true });
     }
 }
 

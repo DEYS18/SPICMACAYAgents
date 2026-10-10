@@ -40,8 +40,9 @@ class ApiTests(unittest.TestCase):
 
     def test_start_in_hindi(self):
         j = self.c.post('/api/assistant/start', json={'language': 'hi'}).get_json()
-        self.assertIn('नमस्ते', j['reply'])
-        self.assertEqual(len(j['recipes']), 7)
+        self.assertIn('नमस्कार', j['reply'])
+        self.assertEqual([r['key'] for r in j['recipes']], ['poster', 'batch', 'pending', 'upcoming', 'about'])
+        self.assertTrue(j['welcome']['title'].startswith('नमस्कार'))
 
     def test_chat_to_filed_apr_and_private_download(self):
         self.llm.push(
@@ -108,7 +109,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.c.post('/admin/login', json={'password': 'wrong'}).status_code, 401)
         self.assertEqual(self.c.post('/admin/login', json={'password': 'test-admin'}).status_code, 200)
         self.assertIn(b'admin.js', self.c.get('/admin').data)
-        self.assertEqual(len(self.c.get('/admin/api/templates').get_json()['templates']), 15)
+        self.assertEqual(len(self.c.get('/admin/api/templates').get_json()['templates']), 16)
         p = self.c.post('/admin/api/preview', json={'key': 'email.payment_request'}).get_json()
         self.assertEqual(p['type'], 'html')
         self.assertIn('DPS Nashik', p['html'])
@@ -116,8 +117,11 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(self.c.post('/admin/api/preview', json={'key': 'layout.poster'}).get_json()['data'])
         self.assertEqual(self.c.post('/admin/api/templates/email.payment_request', json={'body': '{% if %}'}).status_code, 400)
         self.assertEqual(self.c.post('/admin/api/templates/layout.apr.single', json={'body': '{"page": {}}'}).status_code, 400)
-        ok = self.c.post('/admin/api/templates/email.payment_request', json={
-            'body': '{% extends "email.shell" %}{% block content %}<p>Hello {{ institution.name }}</p>{% endblock %}', 'note': 'shorter'}).get_json()
+        short = {'body': '{% extends "email.shell" %}{% block content %}<p>Hello {{ institution.name }}</p>{% endblock %}', 'note': 'shorter'}
+        warned = self.c.post('/admin/api/templates/email.payment_request', json=short)
+        self.assertEqual(warned.status_code, 409)                      # it drops the amount and the APR number: ask first
+        self.assertTrue(warned.get_json()['missing'])
+        ok = self.c.post('/admin/api/templates/email.payment_request', json=dict(short, confirm_missing=True)).get_json()
         self.assertEqual(ok['version'], 2)
         self.c.post('/admin/api/templates/email.payment_request/activate', json={'version': 1})
         self.assertEqual(self.s.gov.get_template('email.payment_request')['version'], 1)

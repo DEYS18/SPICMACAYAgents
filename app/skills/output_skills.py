@@ -455,12 +455,14 @@ class GuidelinesSkill(Skill):
         items = _items(ctx, groups, emails, 'guidelines')
         if not items:
             return {'ok': False, 'error': '; '.join(problems) or 'There are no upcoming events to send guidelines for.'}
-        has_pdf = os.path.exists(GUIDELINES_PDF)
+        from app.core.documents import document_path
+        guidelines_pdf, guidelines_name = document_path(ctx.s, 'doc.event_guidelines')   # the governed version
+        has_pdf = os.path.exists(guidelines_pdf)
         for it in items:
             msg = ctx.s.renderer.render_email('email.pre_event_guidelines', email_context(ctx, {
                 'institution': it['institution'], 'events': it['events'], 'has_attachment': has_pdf}))
             it.update(subject=msg['subject'], html=msg['html'], text=msg['text'],
-                      attachments=[{'path': GUIDELINES_PDF, 'name': 'SPIC_MACAY_Event_Guidelines.pdf'}] if has_pdf else [])
+                      attachments=[{'path': guidelines_pdf, 'name': guidelines_name}] if has_pdf else [])
         return _outbox(ctx, 'guidelines', 'Pre-event guidelines', items, problems)
 
 
@@ -624,7 +626,9 @@ def vision_json(ctx, image_b64, mime, prompt):
         return json.loads(text or '{}'), None
     except Exception as e:
         logger.exception('Vision read failed')
-        return None, f'Could not read the image: {e}'
+        kind, msg = llm.describe_ai_error(e)
+        llm.record_ai_result(ctx.s.gov, False, kind, msg)
+        return None, ('Could not read the image. ' + msg) if kind != 'other' else f'Could not read the image: {e}'
 
 
 def _resolve_artist(ctx, name, art_form, role, event_index=None):

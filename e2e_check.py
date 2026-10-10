@@ -9,6 +9,7 @@ hosts the app, from the project folder, with the same .env:
   python e2e_check.py --voice                  Hindi speech round trip: text to speech to text
   python e2e_check.py --compare-models gpt-5.5,gpt-5.4-mini   the same short conversation on each model
   python e2e_check.py --send-test-email you@spicmacay.com     one real email through your SMTP relay
+  python e2e_check.py --url https://spicmacay.in/<sub-path>    which version the live site is actually running
 
 It never writes to your database (the session is READ ONLY and filing uses an in-memory copy), never emails
 anyone unless --send-test-email is given, and never prints secrets. Results: e2e_output/e2e_report.json.
@@ -47,6 +48,60 @@ def record(area, ok, detail, data=None):
     mark = {True: 'PASS', False: 'FAIL', None: 'NOTE'}[ok]
     print(f'[{mark}] {area}: {detail}')
     REPORT['checks'].append(dict({'area': area, 'result': mark, 'detail': detail}, **({'data': data} if data is not None else {})))
+
+
+# ── 0. installation: is this the version the server runs? ────────────────────
+REQUIRED = [('flask', 'flask'), ('openai', 'openai'), ('mysql.connector', 'mysql-connector-python'), ('reportlab', 'reportlab'),
+            ('PIL', 'Pillow'), ('jinja2', 'jinja2'), ('requests', 'requests'), ('dotenv', 'python-dotenv')]
+
+
+def check_installation(root=ROOT):
+    import importlib.util
+    try:
+        version = (root / 'VERSION').read_text(encoding='utf-8').strip()
+    except OSError:
+        version = 'unknown'
+    record('Installation', None, f'This folder holds APR Assistant {version}: {root}')
+    if (root / 'spicmacay_ai_app' / 'app').exists():
+        record('Installation', False, f"A second copy of the app is nested inside this folder ({root / 'spicmacay_ai_app'}). A server started "
+                                      f"here runs the files in {root}, not the nested ones: move the new files up one level.")
+    if (root.parent / 'app' / '__init__.py').exists() and (root.parent / 'run.py').exists():
+        record('Installation', False, f'This copy sits inside another app folder ({root.parent}). A server started from there runs '
+                                      f'that folder\'s files, which are not this version.')
+    missing = []
+    for mod, pip_name in REQUIRED:
+        try:
+            if importlib.util.find_spec(mod) is None:
+                missing.append(pip_name)
+        except (ImportError, ValueError):
+            missing.append(pip_name)
+    record('Installation', not missing, 'All required packages are installed' if not missing else
+           f"Missing packages: {', '.join(missing)}. Run: pip install -r requirements.txt (on a Lilly-managed machine, through Artifactory)")
+    absent = [f for f in ('app/assistant_setup.py', 'app/templates/admin.html', 'app/skills/batch.py', 'app/static/js/assistant.js')
+              if not (root / f).exists()]
+    if absent:
+        record('Installation', False, f"Files of this version are missing: {', '.join(absent)}. Unzip the whole package again.")
+
+
+def check_live(url):
+    """Ask the running site which version it serves (its /health page)."""
+    import urllib.request
+    target = url.rstrip('/') + '/health'
+    try:
+        with urllib.request.urlopen(target, timeout=15) as resp:
+            data = json.loads(resp.read().decode('utf-8', 'replace'))
+    except Exception as e:
+        record('Live site', False, f'{target} could not be read: {short(e)}')
+        return
+    st = data.get('apr_assistant') if isinstance(data, dict) else None
+    if not st:
+        record('Live site', False, f'The site at {url} runs the PREVIOUS version (its /health has no APR Assistant status). Start the '
+                                   f'server from the new folder, or point the service at it, then restart.')
+    elif st.get('active'):
+        record('Live site', True, f"The site at {url} runs APR Assistant {st.get('version')}, and the new assistant is active.")
+    else:
+        record('Live site', False, f"The site at {url} runs APR Assistant {st.get('version')}, but the new assistant is NOT active: "
+                                   f"{st.get('error')}. Usual fix: pip install -r requirements.txt, then restart.")
 
 
 # ── 1. configuration ─────────────────────────────────────────────────────────
@@ -334,10 +389,14 @@ def main(argv=None):
     ap.add_argument('--voice', action='store_true')
     ap.add_argument('--compare-models', default='')
     ap.add_argument('--send-test-email', default=None)
+    ap.add_argument('--url', default=None, help='the address of the running site, to see which version it serves')
     a = ap.parse_args(argv)
     from dotenv import load_dotenv
     load_dotenv(ROOT / '.env')
     OUT.mkdir(exist_ok=True)
+    check_installation()
+    if a.url:
+        check_live(a.url)
     check_config(ROOT / '.env')
     from app.core.governance import Governance
     real = ROOT / 'instance' / 'governance.db'

@@ -170,6 +170,50 @@ def complete(client, *, model, messages, system=None, tools=None, temperature=0.
     return Result(msg.content, calls, getattr(resp, 'usage', None), resp)
 
 
+def describe_ai_error(e):
+    """(kind, message for the person) for an error from the OpenAI API. The raw error belongs in the log only."""
+    status = getattr(e, 'status_code', None) or getattr(getattr(e, 'response', None), 'status_code', None)
+    body, code = getattr(e, 'body', None), ''
+    if isinstance(body, dict):
+        err = body.get('error') if isinstance(body.get('error'), dict) else body
+        code = str(err.get('code') or err.get('type') or '')
+    text = str(e)
+    low = text.lower()
+    if not status:
+        m = re.search(r'error code:\s*(\d{3})', low)
+        status = int(m.group(1)) if m else None
+    if not code:
+        m = re.search(r"['\"]code['\"]:\s*['\"]([a-z_]+)['\"]", text)
+        code = m.group(1) if m else ''
+    if status == 401 or code in ('invalid_api_key', 'token_invalidated', 'invalid_authentication', 'account_deactivated') \
+            or ('api key' in low and any(w in low for w in ('invalid', 'incorrect', 'revoked'))):
+        return 'auth', ("The AI service rejected this server's API key" + (f' ({code})' if code else '') +
+                        ". An administrator needs to put a new OPENAI_API_KEY in the server's .env file and restart the app.")
+    if code == 'insufficient_quota' or 'insufficient_quota' in low or 'exceeded your current quota' in low:
+        return 'quota', ('The OpenAI account has run out of credit or reached its spending limit. '
+                         'An administrator needs to add credit or raise the limit at platform.openai.com.')
+    if status == 429 or code == 'rate_limit_exceeded':
+        return 'rate', 'The AI service is busy right now. Please try again in a minute.'
+    if status == 404 or code == 'model_not_found':
+        return 'model', ('The AI model set for this server is not available to its API key. '
+                         'An administrator can choose another one in Admin > Settings > Assistant.')
+    if status == 403:
+        return 'forbidden', "The AI service refused this server's request (403). An administrator should check the OpenAI project's permissions."
+    if any(w in low for w in ('timed out', 'timeout', 'connection', 'name resolution', 'getaddrinfo', 'temporarily unavailable')) \
+            or (status or 0) >= 500:
+        return 'network', "The AI service couldn't be reached just now. Please try again shortly."
+    return 'other', 'The AI service returned an error. Please try again; if it keeps happening, an administrator can check the server log.'
+
+
+def record_ai_result(gov, ok, kind=None, message=None):
+    """The latest AI outcome, shown in Admin > Overview."""
+    try:
+        from datetime import datetime
+        gov.cache_set('ai:health', {'ok': bool(ok), 'kind': kind, 'message': message, 'at': datetime.now().isoformat(timespec='seconds')})
+    except Exception:
+        pass
+
+
 def install_compat_shim():
     """Make the classic assistant and guides work with GPT-5.x / GPT-6 too: drop temperature/top_p for
     reasoning models, rename max_tokens, and retry without any optional parameter a model rejects."""

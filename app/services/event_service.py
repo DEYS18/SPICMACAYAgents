@@ -8,6 +8,8 @@ from datetime import date, datetime
 import uuid
 import logging
 
+from app.services import classic_bridge as _bridge
+
 logger = logging.getLogger(__name__)
 
 class EventService:
@@ -140,7 +142,7 @@ class EventService:
         """
         try:
             # Handle both 'start_date' and 'event_date' field names
-            event_date = event_data.get('event_date') or event_data.get('start_date')
+            event_date = _bridge.iso_date(event_data.get('event_date') or event_data.get('start_date'))
             if not event_date:
                 logger.error("Missing event_date or start_date")
                 return {
@@ -185,12 +187,12 @@ class EventService:
                 next_id,
                 event_title,
                 event_date,
-                event_data.get('end_date', event_date),
+                _bridge.iso_date(event_data.get('end_date') or event_date),
                 event_data.get('event_time', '18:00'),
                 self._module_value(event_data.get('module_name', 'Lecture Demonstration')),
                 event_data.get('state', ''),
                 event_data.get('city', ''),
-                str(event_data.get('institution_id', '')),
+                _bridge.institution_value(self, event_data),
                 str(event_data.get('artist_id', '')),
                 accompanying_artist_str,
                 event_data.get('venue', event_data.get('institution_name', '')),
@@ -245,9 +247,12 @@ class EventService:
             Dictionary with APR details or None if failed
         """
         try:
-            event_date = event_data.get('event_date') or event_data.get('start_date', '')
+            event_date = _bridge.iso_date(event_data.get('event_date') or event_data.get('start_date', ''))   # any format (DC1)
             request_id = self._generate_request_id()
             custom_apr = f"APR-{event_id}-{datetime.now().strftime('%Y%m%d')}"
+            portal_apr = _bridge.portal_single(self, event_id, event_data)       # the portal's own APR record too
+            if portal_apr and _bridge.use_portal_number(self):
+                custom_apr = portal_apr
             
             current_date = datetime.now().strftime('%Y-%m-%d')
 
@@ -328,9 +333,12 @@ class EventService:
         if not event_ids:
             return None
         try:
-            event_date = event_data.get('event_date') or event_data.get('start_date', '')
+            event_date = _bridge.iso_date(event_data.get('event_date') or event_data.get('start_date', ''))   # any format (DC1)
             request_id = self._generate_request_id()
             custom_apr = f"APR-{event_ids[0]}-{datetime.now().strftime('%Y%m%d')}"
+            portal_apr = _bridge.portal_group(self, event_ids, event_data)      # program and APR records for the portal
+            if portal_apr and _bridge.use_portal_number(self):
+                custom_apr = portal_apr
             current_date = datetime.now().strftime('%Y-%m-%d')
 
             max_id_result = self.db.fetch_one(
@@ -450,6 +458,8 @@ class EventService:
                 }
             
             logger.info(f"New artist added: {artist_data.get('name')} (ID: {next_id})")
+            
+            _bridge.artist_added(self, next_id, artist_data)   # provisional until approved (DC8)
             
             return {
                 'success': True,
@@ -901,6 +911,9 @@ class EventService:
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'static', 'guidelines', self._GUIDELINES_PDF,
         )
+        if getattr(self, 'portal', None) is not None:      # the version an administrator made active, if any
+            from app.core.documents import document_path
+            path = document_path(self.portal, 'doc.event_guidelines')[0]
         try:
             with open(path, 'rb') as fh:
                 return fh.read()
@@ -1022,7 +1035,7 @@ class EventService:
         try:
             query = """
                 SELECT
-                    e.id, e.title, e.image, e.start_date, e.event_time,
+                    e.id, e.title, e.image, e.start_date, e.event_time, e.artist AS artist_id,
                     COALESCE(em.name, e.event_category) AS module_name, e.city, e.state, e.venue, e.attendees,
                     e.accompanying_artist, e.added_by AS coordinator_name,
                     a.name AS artist_name, a.art_form,

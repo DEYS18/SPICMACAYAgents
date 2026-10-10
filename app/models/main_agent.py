@@ -169,10 +169,18 @@ class ConversationalAgent:
             logger.error(f"Error processing message: {e}")
             logger.error(f"Error type: {type(e).__name__}")
             logger.error(f"Full traceback: {traceback.format_exc()}")
+            response = "I apologize, but I encountered an error. Could you please try again?"
+            try:
+                from app.agents.llm import describe_ai_error
+                kind, msg = describe_ai_error(e)
+                if kind != 'other':
+                    response = f"I apologize: {msg}"
+            except Exception:
+                pass
             return {
                 'success': False,
                 'error': str(e),
-                'response': "I apologize, but I encountered an error. Could you please try again?"
+                'response': response
             }
     
     def process_message_with_image(self, user_message: str, image_b64: str, mime_type: str) -> Dict:

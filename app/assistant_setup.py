@@ -32,7 +32,8 @@ def register_assistant(app, services):
     @require_assistant
     def assistant_page():
         u = current_user() or {}
-        return render_template('assistant.html', user=u, is_admin=is_admin(u), auth_mode=auth_mode(), languages=LANGUAGES)
+        return render_template('assistant.html', user=u, is_admin=is_admin(u), auth_mode=auth_mode(), languages=LANGUAGES,
+                               show_face=bool(services.setting('assistant.show_face', True)))
 
     @app.route('/manifest.webmanifest')
     def webmanifest():

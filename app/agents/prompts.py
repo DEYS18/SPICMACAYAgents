@@ -126,6 +126,9 @@ THE SCREEN
   conversational, and never repeat a card's contents in full.
 - Replies may be read aloud: write them so they sound natural when spoken (no tables).
 """
+FACE = """- The coordinator sees your face on screen (a woman greeting with folded hands) and may hear your voice: in Hindi, Marathi
+  and other languages with gendered verbs, speak of yourself in the feminine (main kar doongi, समझ लूँगी, मी पाहते).
+"""
 
 
 def system_prompt(services, state, registry) -> str:
@@ -150,7 +153,8 @@ def system_prompt(services, state, registry) -> str:
         return CORE.format(**values)
     behind = CORE[CORE.index('BEHIND THE SCENES'):CORE.index('LANGUAGE: {language}')]
     live = CORE[CORE.index('LANGUAGE: {language}'):]
-    return playbook + MERGED + '\n' + behind.format(**values) + '\n' + live.format(**values)
+    face = FACE if services.setting('assistant.show_face', True) else ''
+    return playbook + MERGED + face + '\n' + behind.format(**values) + '\n' + live.format(**values)
 
 
 def _modules_text(services):
@@ -200,11 +204,11 @@ def welcome(lang, name=None, now=None):
     if lang == 'hinglish':
         return {'title': f"Namaste{', ' + first + ' ji' if first else ''}",
                 'text': "Boliye, type kijiye ya program ka poster upload kijiye. APR, Request for Payment, guidelines ya poster: "
-                        "jo bhi chahiye, main sambhaal loonga.",
+                        "jo bhi chahiye, main sambhaal loongi.",
                 'spoken': 'Namaste! SPIC MACAY APR Assistant mein aapka swagat hai. Boliye, type kijiye, ya poster upload kijiye.'}
     if lang == 'mr':
         return {'title': f"नमस्कार{', ' + first + ' जी' if first else ''}",
-                'text': 'बोला, लिहा किंवा कार्यक्रमाचे पोस्टर अपलोड करा. APR, Request for Payment, मार्गदर्शक सूचना किंवा पोस्टर: मी सगळं पाहतो.',
+                'text': 'बोला, लिहा किंवा कार्यक्रमाचे पोस्टर अपलोड करा. APR, Request for Payment, मार्गदर्शक सूचना किंवा पोस्टर: मी सगळं पाहते.',
                 'spoken': 'नमस्कार! स्पिक मैके APR असिस्टंटमध्ये आपले स्वागत आहे.'}
     hindi = 'स्पिक मैके APR असिस्टेंट में आपका स्वागत है। बोलिए, लिखिए या कार्यक्रम का पोस्टर अपलोड कीजिए।'
     return {'title': f"नमस्कार{', ' + first + ' जी' if first else ''}",
@@ -223,7 +227,7 @@ def greeting(lang, services=None, name=None, now=None):
         return ("Namaste! 🙏\n\n**SPIC MACAY APR Assistant mein aapka swagat hai.** Boliye 🎤, type kijiye ya program ka poster upload "
                 "kijiye: APR, Request for Payment, guidelines ya poster, jo bhi chahiye.")
     return (f"नमस्कार{' ' + first + ' जी' if first else ''}! 🙏\n\n**स्पिक मैके APR असिस्टेंट में आपका स्वागत है।** आप बोलकर 🎤, लिखकर या "
-            "कार्यक्रम का पोस्टर अपलोड करके शुरू कर सकते हैं: मैं समझ लूँगा कि आपको क्या चाहिए।\n\n*Welcome! Speak, type or upload a "
+            "कार्यक्रम का पोस्टर अपलोड करके शुरू कर सकते हैं: मैं समझ लूँगी कि आपको क्या चाहिए।\n\n*Welcome! Speak, type or upload a "
             "program poster and I'll take it from there: an Artist Payment Request (APR), a Request for Payment, pre-event "
             "guidelines or a poster, one at a time or together.*")
 

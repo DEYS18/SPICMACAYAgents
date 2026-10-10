@@ -42,6 +42,12 @@ SETTINGS_SCHEMA = [
     ('APR', 'apr.payment_required_default', '"Payment required by Delhi A/c" starts as Yes', 'bool', True, ''),
     ('APR', 'apr.finance_cc', 'Always copy these addresses on APR emails', 'email_list', ['smhighereducation@spicmacay.com'], ''),
     ('APR', 'apr.send_artist_acknowledgement', 'Email the artist a thank-you when an APR is filed', 'bool', True, ''),
+    ('APR', 'apr.attach_poster', 'Attach the program poster to the APR email', 'bool', True,
+     'The poster the coordinator uploaded, or one the assistant made in the conversation. It is also kept with the program, '
+     'so Requests for Payment sent later carry it too.'),
+    ('APR', 'apr.auto_poster', 'No poster yet? Make one when filing (single programs, when the main artist\'s photo is on file)', 'bool', True,
+     'The review card says so before the coordinator taps File APR.'),
+    ('APR', 'apr.calendar_invite', 'Attach a calendar invite (.ics) for upcoming events to the APR email', 'bool', True, ''),
     ('APR', 'apr.write_portal_records', 'Write the portal\'s APR records (custom_apr, and event_series for programs)', 'bool', True,
      'Keep on: this is how the APR appears in the portal and its approval workflow.'),
     ('APR', 'apr.write_ai_request_rows', 'Also write apr_payment_request rows, exactly as the previous version did', 'bool', True,
@@ -83,6 +89,9 @@ SETTINGS_SCHEMA = [
      'auto uses the Responses API for GPT-6 models (needed for tool calling there) and Chat Completions otherwise.', ['auto', 'chat', 'responses']),
     ('Assistant', 'assistant.temperature', 'Creativity (0 to 1; GPT-4o family only)', 'float', 0.3, 'Reasoning models ignore it.'),
     ('Assistant', 'assistant.max_tool_rounds', 'Steps the assistant may take per message', 'int', 8, ''),
+    ('Assistant', 'assistant.show_face', "Show the assistant's face: she greets with folded hands and her lips move while replies are read aloud", 'bool', True,
+     'On a laptop she stands at the left of the conversation, with the program at a glance on the right. In Hindi and Marathi she '
+     'speaks of herself in the feminine, to match the face and the default voice.'),
     # Voice
     ('Voice', 'voice.stt_model', 'Speech recognition model', 'str', 'gpt-4o-mini-transcribe', 'Falls back to whisper-1.'),
     ('Voice', 'voice.tts_model', 'Speech model for spoken replies', 'str', 'gpt-4o-mini-tts', 'Falls back to tts-1.'),

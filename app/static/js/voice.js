@@ -164,33 +164,48 @@
         .replace(/[*_`#>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 600);
       if (!clean) return;
       this.stopSpeaking();
+      const token = this.speakToken = (this.speakToken || 0) + 1;      // a newer reply (or Stop) supersedes this one
+      const start = info => { if (token === this.speakToken && this.o.onSpeakStart) this.o.onSpeakStart(info); };
+      const end = () => { if (token === this.speakToken && this.o.onSpeakEnd) this.o.onSpeakEnd(); };
       if (this.o.serverTTS()) {
         try {
           const res = await fetch(this.o.base + '/api/assistant/voice/speak', { method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: clean, language: lang }) });
           if (res.status === 200) {
-            const url = URL.createObjectURL(await res.blob());
-            this.audio = new Audio(url);
-            await new Promise(done => { this.audio.onended = done; this.audio.onerror = done; this.audio.play().catch(done); });
+            if (token !== this.speakToken) return;
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const audio = this.audio = new Audio(url);
+            const buffer = await blob.arrayBuffer().catch(() => null);     // for the face's lip movement only
+            await new Promise(done => {
+              audio.onplaying = () => start({ audio, buffer });
+              audio.onended = done; audio.onerror = done; audio.onpause = done;
+              audio.play().catch(done);
+            });
+            end();
             URL.revokeObjectURL(url);
             return;
           }
         } catch (e) { /* fall back to the browser voice */ }
       }
-      if (!('speechSynthesis' in global)) return;
+      if (!('speechSynthesis' in global) || token !== this.speakToken) return;
       await new Promise(done => {
         const u = new SpeechSynthesisUtterance(clean), loc = LOCALES[lang] || 'en-IN', voices = speechSynthesis.getVoices();
         u.lang = loc;
         const v = voices.find(x => x.lang === loc) || voices.find(x => x.lang && x.lang.startsWith(loc.split('-')[0]));
         if (v) u.voice = v;
+        u.onstart = () => start({ utterance: u });
         u.onend = done; u.onerror = done;
         speechSynthesis.speak(u);
       });
+      end();
     }
 
     stopSpeaking() {
+      this.speakToken = (this.speakToken || 0) + 1;
       if (this.audio) { this.audio.pause(); this.audio = null; }
       if ('speechSynthesis' in global) speechSynthesis.cancel();
+      if (this.o.onSpeakEnd) this.o.onSpeakEnd();
     }
   }
   Voice.LOCALES = LOCALES;

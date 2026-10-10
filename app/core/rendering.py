@@ -74,6 +74,7 @@ class TemplateRenderer:
         if not t:
             raise KeyError(f'No template {key}')
         tpl = self.env.from_string(t['body']) if override else self.env.get_template(key)
+        ctx = dict({'year': datetime.now().year}, **ctx)       # the frame's copyright line
         html = tpl.render(**ctx)
         subject = self.text_env.from_string(t.get('subject') or '').render(**ctx)
         text_src = (t.get('meta') or {}).get('text')

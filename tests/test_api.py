@@ -109,7 +109,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.c.post('/admin/login', json={'password': 'wrong'}).status_code, 401)
         self.assertEqual(self.c.post('/admin/login', json={'password': 'test-admin'}).status_code, 200)
         self.assertIn(b'admin.js', self.c.get('/admin').data)
-        self.assertEqual(len(self.c.get('/admin/api/templates').get_json()['templates']), 16)
+        self.assertEqual(len(self.c.get('/admin/api/templates').get_json()['templates']), 17)
         p = self.c.post('/admin/api/preview', json={'key': 'email.payment_request'}).get_json()
         self.assertEqual(p['type'], 'html')
         self.assertIn('DPS Nashik', p['html'])

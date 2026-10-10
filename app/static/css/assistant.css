@@ -394,3 +394,130 @@ body::before { display: block !important; content: ""; position: fixed; inset: 0
 .composer .speaker-toggle[aria-pressed="true"]:hover { background: #F2B81A; }
 .topbar h1 { color: var(--kumkum); }
 @media (prefers-reduced-motion: reduce) { .chip.hear { animation: none; } }
+
+/* ── v2.4 (October 2026): a steady "working" indicator, the assistant's face, and the sides of a laptop screen ── */
+
+/* Working indicator: a fixed-height row whose dots move with transform only, so nothing above it ever shifts.
+   (The earlier dots animated their width and, inheriting overflow-wrap:anywhere, wrapped one per line.) */
+.msg.typing { display: flex; align-items: center; gap: 10px; height: 30px; margin-bottom: 22px; white-space: nowrap;
+              overflow-wrap: normal; color: var(--mitti); font-size: 15.5px; }
+.msg.typing span::after { content: none !important; }
+.typing-dots { display: inline-flex; gap: 5px; align-items: center; height: 10px; }
+.typing-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--haldi); animation: tdot 1.2s ease-in-out infinite; }
+.typing-dots i:nth-child(2) { animation-delay: .15s; background: #D98F1E; }
+.typing-dots i:nth-child(3) { animation-delay: .3s; background: var(--sindoor); }
+@keyframes tdot { 0%, 70%, 100% { transform: translateY(0); opacity: .45; } 35% { transform: translateY(-5px); opacity: 1; } }
+
+/* the face */
+.smv-host { display: block; aspect-ratio: 1; position: relative; }
+.smv { width: 100%; height: 100%; display: block; }
+.smv .smv-open { transform-box: fill-box; transform-origin: 50% 15%; transform: scaleY(calc(.15 + var(--open, 0) * .85));
+                 opacity: min(1, calc(var(--open, 0) * 7)); }
+.smv .smv-smile { opacity: max(0, calc(1 - var(--open, 0) * 7)); }
+.smv .smv-eye { transform-box: fill-box; transform-origin: 50% 50%; animation: smv-blink 5.4s 1.2s infinite; }
+.smv .smv-body, .smv .smv-hands { animation: smv-breathe 5s ease-in-out infinite; }
+.smv .smv-head { transform-box: view-box; transform-origin: 100px 118px; transition: transform .35s ease; }
+.smv .smv-pupil { transition: transform .3s ease; }
+.smv .smv-think { opacity: 0; transition: opacity .2s; }
+.smv .smv-ring { transition: stroke .2s; }
+@keyframes smv-blink { 0%, 94%, 100% { transform: scaleY(1); } 96.5% { transform: scaleY(.08); } }
+@keyframes smv-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.2px); } }
+@keyframes smv-nod { 0%, 100% { transform: rotate(-1.4deg); } 30% { transform: rotate(1.2deg) translateY(.6px); } 65% { transform: rotate(-.4deg); } }
+@keyframes smv-ring { 0%, 100% { stroke-width: 3; opacity: 1; } 50% { stroke-width: 6; opacity: .55; } }
+@keyframes smv-dot { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
+[data-state="speaking"] .smv .smv-head { animation: smv-nod 2.6s ease-in-out infinite; }
+[data-state="listening"] .smv .smv-head { transform: rotate(-5deg); }
+[data-state="listening"] .smv .smv-ring { animation: smv-ring 1.2s ease-in-out infinite; stroke: var(--sindoor); }
+[data-state="thinking"] .smv .smv-pupil { transform: translate(1.4px, -1.8px); }
+[data-state="thinking"] .smv .smv-think { opacity: 1; }
+[data-state="thinking"] .smv .smv-think circle { animation: smv-dot 1.1s ease-in-out infinite; }
+[data-state="thinking"] .smv .smv-think circle:nth-child(2) { animation-delay: .18s; }
+[data-state="thinking"] .smv .smv-think circle:nth-child(3) { animation-delay: .36s; }
+/* the one orchestrated moment: a namaste bow as the screen opens */
+.smv-bow .smv .smv-head { animation: smv-bow-head 1.7s ease-in-out .5s 1; }
+.smv-bow .smv .smv-hands { animation: smv-bow-hands 1.7s ease-in-out .5s 1, smv-breathe 5s ease-in-out 2.2s infinite; }
+.smv-bow .smv .smv-eye { animation: smv-bow-eyes 1.7s ease-in-out .5s 1, smv-blink 5.4s 2.4s infinite; }
+@keyframes smv-bow-head { 0%, 100% { transform: none; } 35%, 60% { transform: translateY(5px) scale(.985); } }
+@keyframes smv-bow-hands { 0%, 100% { transform: none; } 35%, 60% { transform: translateY(-3px); } }
+@keyframes smv-bow-eyes { 0%, 25%, 70%, 100% { transform: scaleY(1); } 35%, 60% { transform: scaleY(.1); } }
+
+/* welcome (phones and tablets): the face above the greeting */
+.welcome-face { width: 112px; margin: 0 auto 10px; }
+
+/* speaking chip (phones and tablets): the face while a reply is read aloud, with a way to stop it. It hangs just below
+   the top bar, over older messages, so it never covers a card's buttons or the message box. */
+.speak-chip { position: absolute; left: 50%; top: calc(100% + 8px); transform: translateX(-50%); display: flex; align-items: center;
+              gap: 10px; padding: 5px 6px 5px 5px; border: 1px solid #F1DFA9; border-radius: 999px; background: var(--page); box-shadow: var(--lift);
+              z-index: 18; animation: chip-in .22s ease-out; }
+@keyframes chip-in { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+.speak-face { width: 54px; flex: 0 0 54px; }
+.speak-text { font-weight: 600; color: var(--kumkum); }
+.speak-text::after { content: "…"; }
+
+/* the sides of a laptop screen */
+.side { display: none; }
+@media (min-width: 1180px) {
+  body .app.app.with-rails { grid-template-columns: 284px minmax(0, 1fr) 328px !important; }
+  .with-rails .side { display: block; min-height: 0; overflow-y: auto; background: var(--panel); }
+  .with-rails .host-rail { border-right: 1px solid var(--line); padding: 26px 22px 20px; }
+  .with-rails .program-rail { border-left: 1px solid var(--line); padding: 22px 20px 20px; }
+  .with-rails .welcome-face, .with-rails .speak-chip { display: none !important; }
+  .with-rails .topbar .draft-pill { display: none !important; }
+  .with-rails .messages { padding-left: max(24px, calc((100% - 720px) / 2)); padding-right: max(24px, calc((100% - 720px) / 2)); }
+}
+/* a jharokha: the figure stands in an arched window instead of a round frame */
+.host-stage { width: 206px; margin: 0 auto; padding: 20px 8px 0; border-radius: 103px 103px 16px 16px; overflow: hidden;
+              background: radial-gradient(circle at 50% 36%, #FFF9EA 0%, #FCE9BC 62%, #F4CF7A 100%); border: 2px solid var(--haldi);
+              box-shadow: inset 0 0 0 5px rgba(255, 249, 234, .9), inset 0 0 0 6.5px rgba(163, 22, 30, .28), 0 14px 30px -18px rgba(110, 11, 20, .45); }
+.host-face { width: 100%; margin-bottom: -2px; }
+.host-face .smv-clip { clip-path: none; }
+.host-face .smv-bg, .host-face .smv-ring { display: none; }
+.host-name { margin: 14px 0 2px; text-align: center; font: 400 24px/1.2 var(--head); color: var(--kumkum); }
+.host-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 8px; margin: 0 0 18px; min-height: 36px;
+               font-size: 15px; color: var(--mitti); }
+.hs-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.host-rail[data-state="listening"] .hs-dot { background: var(--sindoor); animation: pulse 1s ease-in-out infinite; }
+.host-rail[data-state="thinking"] .hs-dot { background: var(--haldi); animation: pulse 1s ease-in-out infinite; }
+.host-rail[data-state="speaking"] .hs-dot { background: var(--sindoor); }
+.say h3, .glance-sec h3, .rail-recent h3 { margin: 0 0 8px; font: 600 14.5px/1.3 var(--body); color: var(--mitti); }
+.say-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.say-list button { width: 100%; text-align: left; border: 1px solid var(--line); background: var(--page); border-radius: 12px; padding: 8px 11px;
+                   cursor: pointer; font-size: 14.5px; line-height: 1.4; color: var(--kajal); }
+.say-list button:hover { border-color: var(--haldi); background: var(--kesar); }
+.say-note, .host-tip { font-size: 13px; color: var(--mitti); margin: 8px 2px 0; }
+.host-tip { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+
+/* program at a glance */
+.glance-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.glance-head h2 { margin: 0; font: 400 22px/1.2 var(--head); color: var(--kumkum); }
+.glance-head .ring { width: 38px; height: 38px; }
+.glance-head .ring b { width: 28px; height: 28px; font-size: 12px; background: var(--panel); }
+.glance-type { margin: -4px 0 12px; color: var(--mitti); font-size: 15px; }
+.glance-sec { padding: 10px 0; border-top: 1px solid var(--line); }
+.glance-sec p { margin: 0 0 3px; font-size: 15px; line-height: 1.45; }
+.glance-sec small { display: block; color: var(--mitti); font-size: 13.5px; }
+.glance-sec .ok { color: var(--ok); }
+.glance-ev { margin: 0 0 8px; }
+.glance-ev:last-child { margin-bottom: 0; }
+.glance-need { margin: 0; padding-left: 18px; font-size: 14.5px; }
+.glance-need li::marker { color: var(--sindoor); }
+.glance-out { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.glance-out a.doc-link { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px;
+                         background: var(--page); text-decoration: none; font-weight: 600; font-size: 14px; }
+.glance-out img { width: 46px; height: 62px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; }
+.glance-empty { color: var(--mitti); font-size: 15px; margin: 0; }
+.glance-edit { width: 100%; margin-top: 12px; }
+.rail-recent { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line); }
+@media (prefers-color-scheme: dark) {
+  .host-stage { background: linear-gradient(180deg, #2E2314 0%, #3A2A14 100%); box-shadow: inset 0 0 0 5px #2E2314, inset 0 0 0 6.5px rgba(226, 71, 79, .35); }
+  .speak-chip { border-color: #4A3A22; }
+}
+/* Admin > Settings > Assistant can switch the face off: the page is then as it was, without the sides */
+.no-face .welcome-face, .no-face .speak-chip, .no-face .side { display: none !important; }
+@media (min-width: 1180px) { body.no-face .app.app.with-rails { grid-template-columns: minmax(0, 1fr) !important; }
+  body.no-face .with-rails .topbar .draft-pill:not([hidden]) { display: flex !important; } }
+@media (max-width: 520px) {                       /* long labels keep their line; Open, Download, Share move below */
+  .artifact { flex-wrap: wrap; }
+  .artifact .label { flex: 1 1 150px; }
+  .artifact .actions { flex: 1 1 100%; }
+}

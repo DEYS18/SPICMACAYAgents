@@ -3,7 +3,15 @@
 A voice-first assistant for SPIC MACAY coordinators. In one conversation, typed, spoken (Hindi, English, Hinglish, Marathi and other Indian languages) or tapped, it can file an **Artist Payment Request**, make a **poster**, send **Requests for Payment** and **pre-event guidelines**, or just produce the **documents**: any one of them, or all together. Administrators govern every email, document layout and behaviour from an **admin console**.
 
 The previous assistant is still at `/assistant/classic`. The dashboard and the Convention and Movement guides are unchanged.
-See `docs/REVIEW_AND_CHANGES.md` for the review, the reviewer comments (DC1 to DC15) and everything that changed; `docs/screenshots/` shows the phone, laptop and admin screens.
+See `docs/REVIEW_AND_CHANGES.md` for the review, the reviewer comments (DC1 to DC15) and everything that changed; `docs/screenshots/` shows the phone, laptop and admin screens (`v24_*` for this release).
+
+## New in 2.4 (coordinators' feedback, 10 Oct 2026)
+
+- **Emails look like the earlier app's again:** gold banner, "With Our Thanks" pill, red-edged fact cards, gold amount box; the APR confirmation keeps its red banner. Enhanced with bank particulars in the Request for Payment, an attachment line, and a clean APR subject. Unedited templates upgrade by themselves; edited ones are kept (use **Reset to default** to take the new design).
+- **The poster goes with the APR.** Uploaded poster, or one made in the conversation, is attached; for a single program with the main artist's photo on file, filing makes one. A poster made after filing is kept with the program and offered as an email with the APR. Requests for Payment re-attach it. Calendar invite (.ics) for upcoming events, as before.
+- **Laptop screen:** the assistant's face on the left (greets with folded hands, lips move while replies are read aloud), the program at a glance on the right. On phones the face appears on the welcome and while speaking, with a Stop button.
+- **Steady "Working on it" indicator:** the chat no longer jumps while the assistant works.
+- Admin > Settings: `apr.attach_poster`, `apr.auto_poster`, `apr.calendar_invite`, `assistant.show_face`.
 
 ## Quick start
 
@@ -42,7 +50,7 @@ Use **one worker process**: the weekly-report scheduler and the classic assistan
 
 **The screens look exactly as before (no new assistant, no admin console).** The server is still running the previous version. The most common cause is the package unzipped *inside* the old folder, so the old files keep running.
 
-1. Check the startup line `APR Assistant 2.0.0 ...: ACTIVE`, or open `<your address>/health`.
+1. Check the startup line `APR Assistant 2.4.0 ...: ACTIVE`, or open `<your address>/health`.
 2. Follow `docs/UPGRADE.md`.
 3. Run `python e2e_check.py --url <your address>` to confirm which version the live site serves.
 

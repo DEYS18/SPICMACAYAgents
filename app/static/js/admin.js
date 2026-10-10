@@ -60,7 +60,7 @@
   const GROUP_ORDER = ['APR', 'Request for Payment', 'Event guidelines', 'Posters', 'Other emails', 'Assistant'];
   function groupOf(t) {                       // grouped by what they are for, as coordinators think of them
     const k = t.key;
-    if (k === 'email.apr_confirmation' || k === 'email.apr_batch_summary' || k.startsWith('layout.apr')) return 'APR';
+    if (k === 'email.apr_confirmation' || k === 'email.apr_poster' || k === 'email.apr_batch_summary' || k.startsWith('layout.apr')) return 'APR';
     if (k === 'email.payment_request' || k === 'layout.rfp') return 'Request for Payment';
     if (k === 'email.pre_event_guidelines' || k === 'doc.event_guidelines') return 'Event guidelines';
     if (k === 'layout.poster') return 'Posters';

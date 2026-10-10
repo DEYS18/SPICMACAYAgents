@@ -87,6 +87,28 @@ def _missing(draft, n=6):
     return [i['message'] for i in draft.issues() if i['severity'] == 'required'][:n]
 
 
+def _apr_email_contents(ctx):
+    """What the APR email will carry, said on the review card before the coordinator taps File APR."""
+    from datetime import date as _date
+    from app.core import dates as dtm
+    from app.skills.output_skills import auto_poster_planned, poster_sources
+    d, out = ctx.draft, ['the APR PDF']
+    if ctx.setting('apr.attach_poster', True):
+        src = poster_sources(ctx, d)
+        if any(k == 'uploads' for k, _, _ in src):
+            out.append('the poster you uploaded')
+        elif src:
+            out.append('the poster made here')
+        elif auto_poster_planned(ctx, d):
+            out.append("a poster made from the main artist's photo")
+    photos = len((ctx.state.uploads or {}).get('program_photos') or [])
+    if photos:
+        out.append(f"{photos} program photo{'s' if photos > 1 else ''}")
+    if ctx.setting('apr.calendar_invite', True) and any((dtm._as_date(e.get('date')) or _date.min) >= _date.today() for e in d.d['events']):
+        out.append('a calendar invite')
+    return out
+
+
 class ProgramSkill(Skill):
     key, title, core = 'program', 'Program details', True
     description = 'Program type, title, module, timing, notes and the review before filing.'
@@ -144,9 +166,10 @@ class ProgramSkill(Skill):
             return {'ready': False, 'missing': req, 'warnings': warn}
         cid = ctx.state.new_confirmation('create_apr', rev=ctx.draft.d['rev'])
         summary = ctx.draft.summary_markdown()
+        sends = _apr_email_contents(ctx)
         ctx.ui.cards.append({'type': 'review', 'confirmation_id': cid, 'title': 'Ready to file the APR',
-                             'summary': summary, 'warnings': warn, 'button': 'File APR'})
-        return {'ready': True, 'confirmation_id': cid, 'summary': summary, 'warnings': warn,
+                             'summary': summary, 'warnings': warn, 'button': 'File APR', 'sends': sends})
+        return {'ready': True, 'confirmation_id': cid, 'summary': summary, 'warnings': warn, 'apr_email_will_carry': sends,
                 'next': 'Show the summary; on a clear yes call create_apr with this confirmation_id.'}
 
     @tool('reset_draft', 'Start a fresh program draft (keeps the coordinators).', {'keep_coordinators': B})

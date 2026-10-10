@@ -101,38 +101,96 @@ def apr_context(ctx, apr, draft=None) -> dict:
             'org': ctx.s.org(), 'generated_at': now.strftime('%d-%b-%Y %I:%M') + now.strftime('%p').lower()}
 
 
-def _program_media(ctx, first_event_id, files=None):
-    """Poster and program photos: attached to the APR email and linked to the event the way the
-    portal expects (event_list.image), so later reminders can re-attach the poster."""
+def _latest_posters(draft, limit=4):
+    """Posters made in this conversation, the newest per event (a re-made poster replaces the earlier one)."""
+    by_event = OrderedDict()
+    for p in draft.d['outputs'].get('posters') or []:
+        if p.get('file') and not p.get('event_id'):          # posters for other, already-filed programs stay out
+            by_event.pop(p.get('event_index', 0), None)
+            by_event[p.get('event_index', 0)] = p
+    return list(by_event.values())[-limit:]
+
+
+def poster_sources(ctx, draft):
+    """The posters that go with this program's APR: the coordinator's uploaded poster first (the real one), then posters
+    the assistant made for it."""
+    out = []
+    up = (ctx.state.uploads or {}).get('poster') if draft is ctx.draft else None
+    if up:
+        out.append(('uploads', up, 'poster'))
+    out += [('poster', p['file'], 'poster') for p in _latest_posters(draft)]
+    return out
+
+
+def _link_media(ctx, event_ids, legacy, keep_existing=False):
+    """Keep posters and photos with the program the way the portal expects (event_list.image on every event of the
+    program), so Requests for Payment sent later, even from another conversation, re-attach the poster."""
+    es = ctx.s.event_service
+    if not (legacy and es and event_ids):
+        return
+    try:
+        from app.services.pdf_service import save_event_photos
+        paths = save_event_photos(legacy, event_ids[0])
+        if not paths:
+            return
+        for eid in event_ids:
+            current = []
+            if keep_existing:
+                ev = es.get_event_for_payment(eid) or {}
+                current = [x for x in str(ev.get('image') or '').split(',') if x.strip()]
+            es.update_event_photos(eid, current + [x for x in paths if x not in current])
+    except Exception as e:
+        logger.warning('Could not link program media to events %s: %s', event_ids, e)
+
+
+def _program_media(ctx, event_ids, files=None):
+    """Posters and program photos: attached to the APR email and kept with the program (see _link_media)."""
+    if isinstance(event_ids, int):
+        event_ids = [event_ids]
     up = ctx.state.uploads or {}
     if files is None:
-        files = ([('uploads', up.get('poster'), 'poster')] if up.get('poster') else []) + \
-                [('uploads', f, 'photo') for f in (up.get('program_photos') or [])[:6]]
-    atts, legacy = [], []
+        files = poster_sources(ctx, ctx.draft) + [('uploads', f, 'photo') for f in (up.get('program_photos') or [])[:6]]
+    atts, legacy, seen = [], [], set()
     for kind, fname, label in files:
+        if not fname or (kind, fname) in seen:
+            continue
+        seen.add((kind, fname))
         try:
             data = ctx.s.files.read(kind, fname)
         except (OSError, ValueError, TypeError):
             continue
-        name = ('event_poster.jpg' if not any(a[0] == 'event_poster.jpg' for a in atts) else f'event_poster_{len(atts) + 1}.jpg') \
-            if label == 'poster' else f'program_photo_{len(atts) + 1}.jpg'
+        posters = sum(1 for a in atts if a[0].startswith('event_poster'))
+        name = ('event_poster.jpg' if not posters else f'event_poster_{posters + 1}.jpg') if label == 'poster' \
+            else f'program_photo_{len(atts) - posters + 1}.jpg'
         atts.append((name, data, 'image/jpeg'))
         legacy.append({'bytes': data, 'filename': name, 'mime_type': 'image/jpeg'})
-    if legacy and ctx.s.event_service and first_event_id:
-        try:
-            from app.services.pdf_service import save_event_photos
-            paths = save_event_photos(legacy, first_event_id)
-            if paths:
-                ctx.s.event_service.update_event_photos(first_event_id, paths)
-        except Exception as e:
-            logger.warning('Could not link program photos to event %s: %s', first_event_id, e)
+    _link_media(ctx, list(event_ids or []), legacy)
     return atts
+
+
+def _calendar(ctx, filing, apr):
+    """The .ics invite for the program's upcoming events (none for programs already held)."""
+    if not ctx.setting('apr.calendar_invite', True):
+        return b'', 0
+    from app.core.invites import build_ics
+    d, rows = filing.d, []
+    coords = ', '.join(c.get('name') or c.get('email') or '' for c in d['coordinators'] if c.get('name') or c.get('email'))
+    for e in d['events']:
+        arts = artists_text(filing.effective_artists(e))
+        module = _portal_module(ctx, e.get('module') or d.get('module') or 'Programme')
+        rows.append({'date': e.get('date'), 'start_time': e.get('start_time') or d.get('start_time'),
+                     'end_time': e.get('end_time') or d.get('end_time'),
+                     'summary': f"{ctx.s.org().get('name') or 'SPIC MACAY'}: {module}{' by ' + arts if arts else ''}",
+                     'location': ', '.join(x for x in (e.get('venue'), e.get('institution_name'), e.get('city'), e.get('state')) if x),
+                     'description': '\n'.join(x for x in (f"APR {apr['number']}", f'Artists: {arts}' if arts else '',
+                                                           f'Coordinators: {coords}' if coords else '') if x)})
+    return build_ics(rows, f"apr{_slug(str(apr['number']))}")
 
 
 def next_steps(ctx):
     d, reg, steps = ctx.draft.d, ctx.s.registry, []
     future = any((dt._as_date(e.get('date')) or date.min) > date.today() for e in d['events'])
-    if reg.enabled('posters', ctx.s) and not d['outputs'].get('posters'):
+    if reg.enabled('posters', ctx.s) and not d['outputs'].get('posters') and not (d['outputs'].get('apr') or {}).get('has_poster'):
         steps.append('poster')
     if reg.enabled('payment_requests', ctx.s) and any(isinstance(e.get('contribution'), (int, float)) for e in d['events']):
         steps.append('payment_request')
@@ -161,13 +219,26 @@ def file_draft(ctx, draft, media_files=None, send_email=True):
     fname = ctx.s.files.save('apr', f"APR_{_slug(apr['number'])}.pdf", pdf)
     url = ctx.s.file_url('apr', fname)
     ctx.s.gov.add_program_coordinators(apr['request_id'], result['event_ids'], draft.d['coordinators'], ctx.actor_label)
-    media = _program_media(ctx, result['event_ids'][0], media_files)
+    made = None
+    if media_files is None and draft is ctx.draft and auto_poster_planned(ctx, draft):
+        made = make_poster(ctx, 0, interactive=False, show=False)        # shown next to the APR PDF by create_apr
+        if not made.get('ok'):
+            made = None
+    if not ctx.setting('apr.attach_poster', True):              # admin switch: photos only
+        up = ctx.state.uploads or {}
+        media_files = [('uploads', f, 'photo') for f in (up.get('program_photos') or [])[:6]] if media_files is None \
+            else [m for m in media_files if m[2] != 'poster']
+    media = _program_media(ctx, result['event_ids'], media_files)
+    has_poster = any(a[0].startswith('event_poster') for a in media)
+    ics, n_cal = _calendar(ctx, filing, apr) if send_email else (b'', 0)
     to = [c['email'] for c in draft.d['coordinators'] if c.get('email')]
     sent = {'ok': False, 'skipped': True}
     if send_email:
-        msg = ctx.s.renderer.render_email('email.apr_confirmation', email_context(ctx, dict(pctx, has_poster=bool(media), coordinator=filer)))
+        msg = ctx.s.renderer.render_email('email.apr_confirmation', email_context(ctx, dict(
+            pctx, has_poster=has_poster, has_calendar=bool(n_cal), calendar_events=n_cal, coordinator=filer)))
         sent = ctx.s.mailer.send(to=to, cc=ctx.setting('apr.finance_cc', []), subject=msg['subject'], html=msg['html'], text=msg['text'],
-                                 attachments=[(f"APR_{apr['number']}.pdf", pdf, 'application/pdf')] + media,
+                                 attachments=[(f"APR_{apr['number']}.pdf", pdf, 'application/pdf')] + media
+                                 + ([('SPIC_MACAY_program.ics', ics, 'text/calendar')] if n_cal else []),
                                  actor=ctx.actor_label, category='apr_confirmation')
     acks = []
     if ctx.setting('apr.send_artist_acknowledgement', True) and draft.d['events']:
@@ -190,7 +261,8 @@ def file_draft(ctx, draft, media_files=None, send_email=True):
         except Exception as e:
             logger.warning('apr_created hook failed: %s', e)
     return {'apr': apr, 'event_ids': result['event_ids'], 'event_map': event_map, 'series_id': result.get('series_id'), 'pdf': pdf, 'pdf_file': fname,
-            'pdf_url': url, 'to': to, 'sent': sent, 'acks': acks}
+            'pdf_url': url, 'to': to, 'sent': sent, 'acks': acks, 'has_poster': has_poster, 'poster_made': made,
+            'attached': [f"APR_{apr['number']}.pdf"] + [a[0] for a in media] + (['SPIC_MACAY_program.ics'] if n_cal else [])}
 
 
 def _email_status(sent):
@@ -226,15 +298,20 @@ class AprSkill(Skill):
         draft.d['outputs']['apr'] = {'number': apr['number'], 'request_id': apr['request_id'], 'event_ids': out['event_ids'],
                                      'series_id': out['series_id'], 'pdf_file': out['pdf_file'], 'pdf_url': out['pdf_url'],
                                      'emailed_to': out['to'], 'email_ok': bool(out['sent'].get('ok')), 'dry_run': bool(out['sent'].get('dry_run'))}
+        draft.d['outputs']['apr'].update(has_poster=out['has_poster'], attached=out['attached'])
         draft.bump()
         ctx.ui.artifacts.append({'type': 'pdf', 'label': f"APR {apr['number']}", 'url': out['pdf_url'], 'filename': out['pdf_file']})
+        if out['poster_made']:
+            pm = out['poster_made']
+            ctx.ui.artifacts.append({'type': 'image', 'label': f"Poster, sent with APR {apr['number']}", 'url': pm['poster_url'], 'filename': pm['file']})
         if draft.d.get('batch_ref') and getattr(ctx.state, 'batch', None):
             from app.skills.batch import mark_filed
             mark_filed(ctx.state.batch, draft.d['batch_ref'], out)
         return {'ok': True, 'apr_number': apr['number'], 'event_ids': out['event_ids'], 'pdf_url': out['pdf_url'],
                 'email': _email_status(out['sent']), 'emailed_to': out['to'], 'artist_thanked': out['acks'],
-                'next_steps': next_steps(ctx),
-                'advice': 'Tell the coordinator the APR number, that the PDF is below, and offer the next steps once.'}
+                'attached_to_email': out['attached'], 'poster_with_apr': out['has_poster'], 'next_steps': next_steps(ctx),
+                'advice': 'Tell the coordinator the APR number, that the PDF is below' + (' and that the poster went with it' if out['has_poster'] else '')
+                          + ', and offer the next steps once.'}
 
 
 class DocumentsSkill(Skill):
@@ -283,7 +360,7 @@ def _groups_from_db(ctx, event_ids, amounts, guidelines=False):
                                                     'contact_name': ev.get('institution_coordinator') or '',
                                                     'city': ev.get('institution_city') or ev.get('city') or ''},
                                     'events': [], 'event_ids': [], 'reference': ev.get('custom_apr') or ev.get('request_id') or '',
-                                    'poster_image': ev.get('image'), 'amount_missing': False, 'nil': 0})
+                                    'poster_image': ev.get('image'), 'amount_missing': False, 'nil': 0, 'source': 'db'})
         acc = es.get_accompanying_artists(ev.get('accompanying_artist'))
         arts = ([{'name': ev.get('artist_name'), 'role': 'main'}] if ev.get('artist_name') else []) + \
                [{'name': a['name'], 'role': 'accompanying'} for a in acc]
@@ -356,7 +433,8 @@ def _items(ctx, groups, emails, category):
             status, problem = 'needs_email', 'No email on file for this institution'
         items.append({'item_id': f'i{n}', 'institution': g['institution'], 'to': email or '', 'cc': cc, 'events': g['events'],
                       'event_ids': g['event_ids'], 'amount': total, 'amount_inr': tu.inr(total) if total else '',
-                      'reference': g['reference'], 'poster_image': g.get('poster_image'), 'status': status, 'problem': problem})
+                      'reference': g['reference'], 'poster_image': g.get('poster_image'), 'source': g.get('source', 'draft'),
+                      'status': status, 'problem': problem})
     return items
 
 
@@ -382,10 +460,15 @@ def _render_rfp(ctx, item):
 
 
 def _poster_attachment(ctx, item):
-    if item.get('poster_image'):
+    """The poster for a Request for Payment: the one kept with the program in the portal, else this conversation's."""
+    if item.get('poster_image') and 'event_poster' in str(item['poster_image']):
         return [{'legacy_image': item['poster_image'], 'name': 'program_poster.jpg'}]
-    up = (ctx.state.uploads or {}).get('poster')
-    return [{'kind': 'uploads', 'file': up, 'name': 'program_poster.jpg'}] if up else []
+    apr = ctx.draft.d['outputs'].get('apr') or {}
+    if item.get('source') == 'db' and not set(item.get('event_ids') or []) & set(apr.get('event_ids') or []):
+        up = (ctx.state.uploads or {}).get('poster') if not apr else None   # as before: a poster uploaded for that program
+        return [{'kind': 'uploads', 'file': up, 'name': 'program_poster.jpg'}] if up else []
+    src = poster_sources(ctx, ctx.draft)[:1]
+    return [{'kind': src[0][0], 'file': src[0][1], 'name': 'program_poster.jpg'}] if src else []
 
 
 def _outbox(ctx, category, title, items, problems):
@@ -432,12 +515,13 @@ class PaymentsSkill(Skill):
             if it['status'] == 'skipped':
                 continue
             fname = _render_rfp(ctx, it)
+            poster = _poster_attachment(ctx, it)
             it.update(pdf_file=fname, pdf_url=ctx.s.file_url('rfp', fname),
-                      attachments=[{'kind': 'rfp', 'file': fname, 'name': 'Request_for_Payment.pdf'}] + _poster_attachment(ctx, it))
+                      attachments=[{'kind': 'rfp', 'file': fname, 'name': 'Request_for_Payment.pdf'}] + poster)
             msg = ctx.s.renderer.render_email('email.payment_request', email_context(ctx, {
                 'institution': it['institution'], 'events': it['events'], 'amount_inr': it['amount_inr'] or '0',
                 'amount_words': tu.amount_in_words(it['amount']) if it['amount'] else '', 'reference': it['reference'],
-                'feedback_url': ctx.setting('rfp.feedback_form_url', '')}))
+                'feedback_url': ctx.setting('rfp.feedback_form_url', ''), 'bank': bank_context(ctx.setting), 'has_poster': bool(poster)}))
             it.update(subject=msg['subject'], html=msg['html'], text=msg['text'])
         return _outbox(ctx, 'payment_request', 'Request for Payment', items, problems)
 
@@ -518,69 +602,140 @@ class OutboxSkill(Skill):
 _POSTER_LOCK = threading.Lock()
 
 
+def _main_photo_on_file(ctx, draft, event_index=0):
+    e = draft.d['events'][event_index] if len(draft.d['events']) > event_index else None
+    main = next((a for a in (draft.effective_artists(e) if e else []) if a.get('role') == 'main'), None)
+    if not (main and ctx.s.poster):
+        return False
+    key = main.get('artist_id') or 'n-' + _slug(main.get('name') or '')
+    return bool(ctx.s.poster.stored_artist_photo_path(key))
+
+
+def auto_poster_planned(ctx, draft) -> bool:
+    """Whether filing will make a poster to go with the APR: a single program with no poster yet, the main artist's photo on
+    file, and the admin switches on. (Circuits and Virasat attach the posters made or uploaded for them.)"""
+    return bool(draft.d.get('program_type') == 'single' and ctx.setting('apr.attach_poster', True)
+                and ctx.setting('apr.auto_poster', True) and ctx.s.registry.enabled('posters', ctx.s)
+                and not poster_sources(ctx, draft) and _main_photo_on_file(ctx, draft))
+
+
+def make_poster(ctx, event_index=0, event_id=None, proceed_without_photo=False, interactive=True, show=True):
+    """Draw a poster for one event of the draft or an existing program. interactive=False never asks for a photo
+    (used when filing); show=False leaves it to the caller to show the poster."""
+    poster = ctx.s.poster
+    if not poster:
+        return {'ok': False, 'error': 'Poster generation is unavailable on this server.'}
+    style = ctx.s.renderer.layout('layout.poster')
+    tfmt = ctx.setting('poster.time_format', '12h')
+    if event_id:
+        ev = ctx.s.event_service.get_event_for_resend(event_id) if ctx.s.event_service else None
+        if not ev:
+            return {'ok': False, 'error': f'No program with ID {event_id}.'}
+        best = ctx.s.index.search_artists(ev.get('artist_name') or '')['best'] or {}
+        main = {'name': ev.get('artist_name'), 'art_form': ev.get('art_form'), 'artist_id': best.get('tid')}
+        data = {'institution_name': ev.get('institution_name'), 'module_name': ev.get('module_name'), 'start_date': str(ev.get('start_date') or ''),
+                'event_time': ev.get('event_time') or '', 'venue': ev.get('venue'), 'city': ev.get('city'), 'state': ev.get('state'),
+                'chapter': ev.get('chapter') or ''}
+        acc = [a['name'] for a in ctx.s.event_service.get_accompanying_artists(ev.get('accompanying_artist'))]
+    else:
+        if not ctx.draft.d['events']:
+            return {'ok': False, 'error': 'Add the date and institution first.'}
+        e = ctx.draft.event(event_index or 0)
+        arts = ctx.draft.effective_artists(e)
+        main = next((a for a in arts if a.get('role') == 'main'), None)
+        if not main:
+            return {'ok': False, 'error': 'Choose the main artist first.'}
+        d = ctx.draft.d
+        data = {'institution_name': e.get('institution_name'), 'module_name': e.get('module') or d.get('module'),
+                'start_date': e.get('date') or '', 'event_time': dt.format_time(e.get('start_time') or d.get('start_time'), tfmt).upper(),
+                'venue': e.get('venue') or e.get('institution_name'), 'city': e.get('city'), 'state': e.get('state'),
+                'chapter': d.get('chapter') or ''}
+        acc = [a['name'] for a in arts if a.get('role') != 'main']
+    key = main.get('artist_id') or 'n-' + _slug(main.get('name') or '')
+    has_photo = bool(poster.stored_artist_photo_path(key))
+    require = ctx.setting('poster.require_main_artist_photo', True)
+    if not has_photo and (require or not proceed_without_photo):
+        if not interactive:
+            return {'ok': False, 'needs_artist_photo': True}
+        ctx.state.awaiting = {'kind': 'artist_photo', 'artist_id': key, 'name': main.get('name'), 'role': 'main'}
+        ctx.ui.cards.append({'type': 'upload', 'kind': 'artist_photo', 'title': f"Photo of {main.get('name')}",
+                             'subtitle': 'Main artist. Needed for the poster and kept for future posters.',
+                             'target': {'artist_id': key, 'role': 'main', 'name': main.get('name')}})
+        return {'ok': False, 'needs_artist_photo': True, 'artist': main.get('name'), 'required_by_policy': require,
+                'advice': "Ask for a photo of the MAIN artist (kept for future posters)." +
+                          ('' if require else ' If they have none, call generate_poster with proceed_without_photo=true.')}
+    filer = ctx.draft.filer() or {}
+    data.update({'artist_name': main.get('name'), 'art_form': main.get('art_form'), 'artist_id': key,
+                 'coordinator_name': filer.get('name') if style.get('show_coordinator', True) else '',
+                 'accompanying_artists': acc if style.get('show_accompanying', True) else []})
+    with _POSTER_LOCK:
+        jpg = poster.generate_with_style(data, style)
+    if not jpg:
+        return {'ok': False, 'error': 'The poster could not be drawn (image library unavailable).'}
+    fname = ctx.s.files.save('poster', f"poster_{_slug(main.get('name') or 'artist')}_{_stamp()}.jpg", jpg)
+    url = ctx.s.file_url('poster', fname)
+    entry = {'file': fname, 'url': url, 'event_index': None if event_id else (event_index or 0)}
+    if event_id:
+        entry['event_id'] = event_id
+    ctx.draft.d['outputs'].setdefault('posters', []).append(entry)
+    ctx.draft.bump()
+    if show:
+        ctx.ui.artifacts.append({'type': 'image', 'label': f"Poster: {main.get('name')}", 'url': url, 'filename': fname})
+    ctx.s.gov.audit(ctx.actor_label, 'poster.created', fname, {'artist': main.get('name')})
+    return {'ok': True, 'poster_url': url, 'file': fname, 'artist_photo_used': has_photo, 'jpg': jpg}
+
+
+def _poster_after_filing(ctx, res, event_index):
+    """The APR email has already gone: keep the poster with the program (so Requests for Payment carry it) and prepare an
+    email that sends it to the coordinators and finance together with the APR, shown for a tap on Send."""
+    apr = ctx.draft.d['outputs'].get('apr') or {}
+    ids = apr.get('event_ids') or []
+    if not ids:
+        return {}
+    _link_media(ctx, ids, [{'bytes': res['jpg'], 'filename': 'event_poster_made.jpg', 'mime_type': 'image/jpeg'}], keep_existing=True)
+    if apr.get('has_poster'):
+        return {'kept_with_program': True}
+    coords = [c['email'] for c in ctx.draft.d['coordinators'] if c.get('email')]
+    pctx = apr_context(ctx, {'number': apr['number'], 'request_id': apr.get('request_id') or ''})
+    msg = ctx.s.renderer.render_email('email.apr_poster', email_context(ctx, dict(pctx, coordinator=ctx.draft.filer() or {})))
+    atts = [{'kind': 'poster', 'file': res['file'], 'name': 'program_poster.jpg'}]
+    if apr.get('pdf_file'):
+        atts.append({'kind': 'apr', 'file': apr['pdf_file'], 'name': f"APR_{apr['number']}.pdf"})
+    item = {'item_id': 'i1', 'institution': {'name': f"Coordinators of APR {apr['number']}"}, 'to': coords[0] if coords else '',
+            'cc': coords[1:] + list(ctx.setting('apr.finance_cc', []) or []), 'events': [], 'event_ids': ids, 'amount': 0, 'amount_inr': '',
+            'reference': f"APR {apr['number']}", 'poster_image': None, 'status': 'ready' if coords else 'needs_email',
+            'problem': '' if coords else 'No coordinator email on this program', 'subject': msg['subject'], 'html': msg['html'],
+            'text': msg['text'], 'attachments': atts}
+    out = _outbox(ctx, 'apr_poster', f"Send the poster with APR {apr['number']}", [item], [])
+    return {'kept_with_program': True, 'email_prepared': True, 'confirmation_id': out['confirmation_id'],
+            'advice': 'The APR email went before this poster existed. A ready email (poster + APR PDF to the coordinators and finance) '
+                      'is shown with a Send button: mention it in one short sentence; send only after a clear yes (send_prepared_emails).'}
+
+
 class PostersSkill(Skill):
     key, title = 'posters', 'Posters'
     description = "SPIC MACAY poster from the draft or an existing program, using the main artist's photo."
 
     @tool('generate_poster', "Make a poster for one event of the draft (event_index) or an existing program (event_id). "
-          "Needs the MAIN artist's photo on file (request_artist_photo).",
+          "Needs the MAIN artist's photo on file (request_artist_photo). Before filing, the poster then goes with the APR email; "
+          "after filing, an email sending it with the APR is prepared for confirmation.",
           {'event_index': I, 'event_id': I, 'proceed_without_photo': {'type': 'boolean', 'description': 'Only if the user has no photo and the admin allows it'}})
     def generate_poster(self, ctx, event_index=0, event_id=None, proceed_without_photo=False):
-        poster = ctx.s.poster
-        if not poster:
-            return {'ok': False, 'error': 'Poster generation is unavailable on this server.'}
-        style = ctx.s.renderer.layout('layout.poster')
-        tfmt = ctx.setting('poster.time_format', '12h')
+        res = make_poster(ctx, event_index, event_id, proceed_without_photo)
+        if not res.get('ok'):
+            return res
+        out = {'ok': True, 'poster_url': res['poster_url'], 'artist_photo_used': res['artist_photo_used']}
         if event_id:
-            ev = ctx.s.event_service.get_event_for_resend(event_id) if ctx.s.event_service else None
-            if not ev:
-                return {'ok': False, 'error': f'No program with ID {event_id}.'}
-            best = ctx.s.index.search_artists(ev.get('artist_name') or '')['best'] or {}
-            main = {'name': ev.get('artist_name'), 'art_form': ev.get('art_form'), 'artist_id': best.get('tid')}
-            data = {'institution_name': ev.get('institution_name'), 'module_name': ev.get('module_name'), 'start_date': str(ev.get('start_date') or ''),
-                    'event_time': ev.get('event_time') or '', 'venue': ev.get('venue'), 'city': ev.get('city'), 'state': ev.get('state'),
-                    'chapter': ev.get('chapter') or ''}
-            acc = [a['name'] for a in ctx.s.event_service.get_accompanying_artists(ev.get('accompanying_artist'))]
-        else:
-            if not ctx.draft.d['events']:
-                return {'ok': False, 'error': 'Add the date and institution first.'}
-            e = ctx.draft.event(event_index or 0)
-            arts = ctx.draft.effective_artists(e)
-            main = next((a for a in arts if a.get('role') == 'main'), None)
-            if not main:
-                return {'ok': False, 'error': 'Choose the main artist first.'}
-            d = ctx.draft.d
-            data = {'institution_name': e.get('institution_name'), 'module_name': e.get('module') or d.get('module'),
-                    'start_date': e.get('date') or '', 'event_time': dt.format_time(e.get('start_time') or d.get('start_time'), tfmt).upper(),
-                    'venue': e.get('venue') or e.get('institution_name'), 'city': e.get('city'), 'state': e.get('state'),
-                    'chapter': d.get('chapter') or ''}
-            acc = [a['name'] for a in arts if a.get('role') != 'main']
-        key = main.get('artist_id') or 'n-' + _slug(main.get('name') or '')
-        has_photo = bool(poster.stored_artist_photo_path(key))
-        require = ctx.setting('poster.require_main_artist_photo', True)
-        if not has_photo and (require or not proceed_without_photo):
-            ctx.state.awaiting = {'kind': 'artist_photo', 'artist_id': key, 'name': main.get('name'), 'role': 'main'}
-            ctx.ui.cards.append({'type': 'upload', 'kind': 'artist_photo', 'title': f"Photo of {main.get('name')}",
-                                 'subtitle': 'Main artist. Needed for the poster and kept for future posters.',
-                                 'target': {'artist_id': key, 'role': 'main', 'name': main.get('name')}})
-            return {'ok': False, 'needs_artist_photo': True, 'artist': main.get('name'), 'required_by_policy': require,
-                    'advice': "Ask for a photo of the MAIN artist (kept for future posters)." +
-                              ('' if require else ' If they have none, call generate_poster with proceed_without_photo=true.')}
-        filer = ctx.draft.filer() or {}
-        data.update({'artist_name': main.get('name'), 'art_form': main.get('art_form'), 'artist_id': key,
-                     'coordinator_name': filer.get('name') if style.get('show_coordinator', True) else '',
-                     'accompanying_artists': acc if style.get('show_accompanying', True) else []})
-        with _POSTER_LOCK:
-            jpg = poster.generate_with_style(data, style)
-        if not jpg:
-            return {'ok': False, 'error': 'The poster could not be drawn (image library unavailable).'}
-        fname = ctx.s.files.save('poster', f"poster_{_slug(main.get('name') or 'artist')}_{_stamp()}.jpg", jpg)
-        url = ctx.s.file_url('poster', fname)
-        ctx.draft.d['outputs'].setdefault('posters', []).append({'file': fname, 'url': url})
-        ctx.draft.bump()
-        ctx.ui.artifacts.append({'type': 'image', 'label': f"Poster: {main.get('name')}", 'url': url, 'filename': fname})
-        ctx.s.gov.audit(ctx.actor_label, 'poster.created', fname, {'artist': main.get('name')})
-        return {'ok': True, 'poster_url': url, 'artist_photo_used': has_photo}
+            _link_media(ctx, [event_id], [{'bytes': res['jpg'], 'filename': 'event_poster_made.jpg', 'mime_type': 'image/jpeg'}],
+                        keep_existing=True)
+        elif ctx.draft.d['outputs'].get('apr'):
+            try:
+                out.update(_poster_after_filing(ctx, res, event_index))
+            except Exception as e:
+                logger.warning('Could not prepare the poster email: %s', e)
+        elif ctx.setting('apr.attach_poster', True):
+            out['note'] = 'This poster will be attached to the APR email when the APR is filed.'
+        return out
 
 
 POSTER_PROMPT = """You are reading a SPIC MACAY program poster to pre-fill program records. Return ONLY a JSON object:

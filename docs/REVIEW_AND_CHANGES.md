@@ -189,6 +189,19 @@ Everything else was already in place:
 - the live previews, test emails and history;
 - reset to default, and the sandboxed test render before every save.
 
+## 8i. 2.4: emails, the poster, the laptop screen and the face
+
+| Feedback | Cause | What changed |
+|---|---|---|
+| The earlier app's APR and Request for Payment emails looked better | 2.0 replaced them with a plain red-banner frame | The earlier designs are back as governed templates (gold banner, pills, fact cards, amount box; red banner for the APR), plus bank particulars, an attachment line and a calendar note. `email.shell`, `email.apr_confirmation`, `email.payment_request` and the others upgrade on start-up only if nobody edited them (`app/core/template_history.py`) |
+| The poster no longer came with the APR | Only an *uploaded* poster was attached; the usual "Make a poster" step ran after the APR email had gone | Uploaded or made-here posters are attached; filing a single program makes one when the main artist's photo is on file (the review card says so first); a poster made after filing is linked to every event of the program and offered as a prepared email (`email.apr_poster`) with the APR. Requests for Payment re-attach it |
+| — | APR subject included the institution's contact details and a line break | Subject is now "SPIC MACAY APR 208 Confirmation – artist at institution" |
+| Sides of a laptop screen look empty | One 760 px column | From 1180 px: the assistant's face, status and examples on the left; the program at a glance (read-only) on the right, opening the Details drawer to edit |
+| Chat text jumps while "Working on it" shows | The dots animated their width and, inheriting `overflow-wrap: anywhere`, wrapped one per line: the bubble's height cycled 27, 54, 82 px | A fixed-height indicator animated with transforms only (measured steady at 30 px) |
+| A human face with folded hands, speaking | — | `app/static/js/avatar.js`: SVG figure (namaste), idle / listening / thinking / speaking states; lips follow the loudness of the server voice (decoded separately, playback untouched) or a speech rhythm for the browser voice. Admin switch `assistant.show_face`. Hindi and Marathi greetings and self-references are now feminine, to match |
+
+The previous assistant at `/assistant/classic` is unchanged.
+
 ## 9. Testing: what was and was not verified
 
 **Verified here:**

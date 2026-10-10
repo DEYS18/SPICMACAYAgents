@@ -11,9 +11,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;600;700&family=Tiro+Devanagari+Hindi&display=swap" rel="stylesheet" media="print" onload="this.media=\'all\'">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/assistant.css') }}">
 </head>
-<body class="is-empty" data-base="{{ request.script_root }}" data-admin="{{ '1' if is_admin else '' }}" data-signed-in="{{ '1' if user and user.get('email') else '' }}">
+<body class="is-empty{{ '' if show_face else ' no-face' }}" data-base="{{ request.script_root }}" data-admin="{{ '1' if is_admin else '' }}" data-signed-in="{{ '1' if user and user.get('email') else '' }}">
 <a class="skip" href="#composer-input">Skip to the message box</a>
-<div class="app" id="app">
+<div class="app with-rails" id="app">
   <header class="topbar">
     <a class="brand" href="{{ app_root() }}" aria-label="SPIC MACAY home"><img src="{{ url_for('static', filename='img/brand/spicmacay_wordmark.png') }}" alt="SPIC MACAY"></a>
     <div class="topbar-title"><h1>APR Assistant</h1><span id="ai-status" class="ai-status" hidden>AI offline</span></div>
@@ -46,7 +46,22 @@
         <p class="menu-note">APR Assistant {{ apr_version }}</p>
       </div>
     </div>
+    <div id="speak-chip" class="speak-chip" hidden><span class="speak-face" id="speak-face"></span><span class="speak-text">Speaking</span>
+      <button id="speak-stop" class="btn ghost small" type="button">Stop</button></div>
   </header>
+
+  <aside class="side host-rail" id="host-rail" aria-label="The assistant">
+    <div class="host-stage"><div class="host-face" id="host-face"></div></div>
+    <h2 class="host-name">APR Assistant</h2>
+    <p class="host-status" id="host-status"><span class="hs-dot" aria-hidden="true"></span><span id="host-status-text">Ready when you are</span>
+      <button id="host-stop" class="btn ghost small" type="button" hidden>Stop speaking</button></p>
+    <div class="say">
+      <h3>You can say</h3>
+      <ul id="say-list" class="say-list"></ul>
+      <p class="say-note">Tap one to put it in the message box, then change the details.</p>
+    </div>
+    <p class="host-tip">Tap the mic and speak in any language, or hold it while you talk. Alt+V on a keyboard.</p>
+  </aside>
 
   <main class="conversation" id="conversation">
     <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
@@ -87,6 +102,11 @@
     </div>
   </main>
 
+  <aside class="side program-rail" id="program-rail" aria-label="This program at a glance">
+    <div id="program-glance"></div>
+    <div id="rail-recent-wrap" class="rail-recent" hidden><h3>Pick up where you left off</h3><ul id="rail-recent" class="recent"></ul></div>
+  </aside>
+
   <div class="backdrop" id="backdrop" hidden></div>
   <section class="draft" id="draft" aria-label="Program details">
     <div class="sheet-handle"><span></span><strong class="sheet-title">Details</strong><button id="draft-close" class="btn ghost small" type="button">Close</button></div>
@@ -95,6 +115,7 @@
 </div>
 <div id="drop-hint" class="drop-hint" hidden>Drop one or several posters, a photo or a circuit list</div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="{{ url_for('static', filename='js/avatar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/voice.js') }}"></script>
 <script src="{{ url_for('static', filename='js/assistant.js') }}"></script>
 </body>

@@ -6,67 +6,122 @@ from the previous app so nothing already approved changes.
 """
 import copy
 
+# The look of the previous app's emails, which coordinators liked: a haldi-gold banner with a sindoor rule, a warm
+# cream page, a pill naming what the email is about, white fact cards edged in red and a gold amount box. The APR
+# confirmation keeps its own sindoor banner. Layout uses tables, not flexbox, so Outlook and Gmail render it the same.
 SHELL = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light">
 <style>
-body{margin:0;background:#f4ece2;font-family:Arial,Helvetica,sans-serif;color:#2a1b14;line-height:1.55}
-.wrap{max-width:640px;margin:0 auto;padding:18px}
-.head{background:#a3161e;color:#fff;padding:22px 26px;border-radius:12px 12px 0 0;border-bottom:4px solid #e9a800}
-.head h1{margin:0;font-family:Georgia,serif;font-size:22px}
-.head p{margin:4px 0 0;font-size:12px;opacity:.9}
-.body{background:#fff;padding:26px;border-radius:0 0 12px 12px}
-table.facts{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
-table.facts td{padding:8px 6px;border-bottom:1px solid #f0e3cf;vertical-align:top}
-table.facts td.k{color:#6e0b14;font-weight:bold;width:38%}
-table.grid{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0}
-table.grid th{background:#fff1cc;color:#6e0b14;text-align:left;padding:7px;border:1px solid #f0e3cf}
-table.grid td{padding:7px;border:1px solid #f0e3cf;vertical-align:top}
-.amount{background:#fff1cc;border:1px solid #e9a800;border-radius:10px;padding:14px;text-align:center;margin:18px 0}
-.amount span{display:block;font-size:12px;color:#6e0b14}
-.amount b{display:block;font-size:26px;color:#a3161e}
-.sop h3{color:#6e0b14;font-size:15px;margin:18px 0 6px}
+body{margin:0;padding:0;background:#F6EEDC;font-family:Arial,Helvetica,sans-serif;color:#3D2B00;line-height:1.6;-webkit-text-size-adjust:100%}
+.wrap{max-width:620px;margin:0 auto;padding:20px 12px}
+.head{background:#F7C948;background:linear-gradient(135deg,#FDEFB8 0%,#F7C948 55%,#E8A800 100%);color:#8B0000;padding:28px 24px 24px;text-align:center;border-radius:12px 12px 0 0;border-bottom:4px solid #B3161C}
+.head h1{margin:0;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.25;color:#8B0000}
+.head p{margin:6px 0 0;font-size:12.5px;color:#7A2A12}
+.head .rule{display:block;width:70px;height:2px;margin:12px auto 0;background:#B3161C;font-size:0;line-height:0}
+.head.sindoor{background:#A3161E;background:linear-gradient(135deg,#8B0000 0%,#C1121F 60%,#DC143C 100%);border-bottom-color:#E8A800}
+.head.sindoor h1,.head.sindoor p{color:#FFFFFF}
+.head.sindoor .rule{background:#F7C948}
+.body{background:#FFFBEF;padding:28px 26px 24px;border:1px solid #F1E2B8;border-top:0;border-radius:0 0 12px 12px}
+.body p{margin:0 0 12px}
+.pill{display:inline-block;background:#FFF3CD;border:2px solid #FFC107;color:#7A5B00;font-weight:bold;padding:5px 15px;border-radius:20px;font-size:13px;margin:2px 0 14px}
+table.facts{width:100%;border-collapse:separate;border-spacing:0;background:#FFFFFF;border-left:4px solid #B3161C;border-radius:10px;margin:18px 0;font-size:14px}
+table.facts th{text-align:left;color:#8B0000;font-size:15px;padding:12px 14px 2px;font-family:Georgia,'Times New Roman',serif}
+table.facts td{padding:9px 14px;border-bottom:1px solid #F0E6C8;vertical-align:top}
+table.facts tr:last-child td{border-bottom:0}
+table.facts td.k{color:#8B0000;font-weight:bold;width:40%}
+table.facts.plain{background:transparent;border-left:0;margin:0}
+table.facts.plain td{padding:4px 0;border-bottom:0}
+table.grid{width:100%;border-collapse:collapse;font-size:13px;margin:14px 0}
+table.grid th{background:#5B1414;color:#FFFFFF;text-align:left;padding:8px 9px;font-size:12px}
+table.grid td{padding:8px 9px;border-bottom:1px solid #F0E6C8;vertical-align:top;background:#FFFFFF}
+table.grid tr:nth-child(even) td{background:#FFF6DF}
+.apr-box{background:#FFF3CD;border:2px solid #FFC107;border-radius:10px;padding:10px 16px;margin:18px 0}
+.apr-box .big{font-size:22px;color:#8B0000}
+.amount{background:#F7C948;background:linear-gradient(135deg,#FDEFB8 0%,#F7C948 100%);border:2px solid #E8A800;border-radius:10px;padding:16px 20px;margin:20px 0;text-align:center}
+.amount span{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#7A5B00;font-weight:bold}
+.amount b{display:block;font-size:28px;color:#8B0000;margin-top:4px;line-height:1.2}
+.amount small{display:block;font-size:12.5px;color:#7A5B00;margin-top:4px}
+.bank{background:#FFFFFF;border:1px dashed #E8C66A;border-radius:10px;padding:10px 16px 8px;margin:16px 0}
+.bank h3,.box h3{margin:0 0 6px;color:#8B0000;font-size:14px}
+.attach{font-size:13px;color:#5C4630;background:#FFFFFF;border:1px dashed #E8C66A;border-radius:8px;padding:8px 12px;margin:16px 0}
+.sop h3{color:#8B0000;font-size:15px;margin:18px 0 6px}
 .sop ul{margin:0 0 6px 18px;padding:0}
-.note{font-size:13px;color:#6b5a50}
-.foot{text-align:center;font-size:12px;color:#8a7366;padding:14px}
-a{color:#a3161e}
+.sop li{font-size:13.5px;margin-bottom:4px}
+.note{font-size:13px;color:#7A6050}
+.nw{white-space:nowrap}
+.sign{margin-top:22px}
+.foot{text-align:center;font-size:12px;color:#7A6050;padding:16px 10px 4px;line-height:1.7}
+a{color:#B3161C}
 </style></head><body><div class="wrap">
-<div class="head"><h1>{{ org.name }}</h1><p>{{ org.tagline }}</p></div>
+{% block banner %}<div class="head"><h1>&#127917; {{ org.name }}</h1><p>{{ org.tagline }}</p><span class="rule">&nbsp;</span></div>{% endblock %}
 <div class="body">{% block content %}{% endblock %}</div>
-<div class="foot">{% block footer %}{{ org.name }} | <a href="{{ org.website }}">{{ org.website_short }}</a> | {{ org.info_email }}{% endblock %}</div>
+<div class="foot">{% block footer %}This is an automated email from the {{ org.name }} Supatra Platform.<br><a href="{{ org.website }}">{{ org.website_short }}</a>{% if org.info_email %} &middot; {{ org.info_email }}{% endif %}<br>&copy; {{ year }} {{ org.name }}. All rights reserved.{% endblock %}</div>
 </div></body></html>"""
 
-SIGN = """<p style="margin-top:22px">Warm regards,<br><strong>{{ coordinator.name or org.name + ' Team' }}</strong><br>{{ org.name }}{% if coordinator.chapter %} {{ coordinator.chapter }}{% endif %}</p>"""
+SIGN = """<p class="sign">Warm regards,<br><strong>{{ coordinator.name or org.name + ' Team' }}</strong><br>{{ org.name }}{% if coordinator.chapter %} {{ coordinator.chapter }}{% endif %}</p>"""
 
-APR_CONFIRMATION = """{% extends "email.shell" %}{% block content %}
-<p>Dear {{ coordinator.name or 'Coordinator' }},</p>
-<p>The Artist Payment Request for this program has been filed. The APR document is attached{% if has_poster %}, along with the poster{% endif %}.</p>
-<table class="facts">
-<tr><td class="k">APR number</td><td>{{ apr.number }}</td></tr>
+APR_CONFIRMATION = """{% extends "email.shell" %}
+{% block banner %}<div class="head sindoor"><h1>&#127917; {{ org.name }} Artist Payment Request (APR) Confirmation</h1><p>{{ org.tagline }}</p><span class="rule">&nbsp;</span></div>{% endblock %}
+{% block content %}
+<p>Namaste{% if coordinator.name %} {{ coordinator.name }} ji{% endif %},</p>
+<span class="pill">&#9989; APR Filed</span>
+<p>Your {{ org.name }} program has been registered and its Artist Payment Request (APR) has been created. The APR document is attached{% if has_poster %}, along with the program poster{% endif %}{% if has_calendar %} and a calendar invite{% endif %}.</p>
+<div class="apr-box"><table class="facts plain">
+<tr><td class="k">&#128203; APR No.</td><td><b class="big">{{ apr.number }}</b></td></tr>
+{% if apr.request_id %}<tr><td class="k">Request ID</td><td>{{ apr.request_id }}</td></tr>{% endif %}
 <tr><td class="k">Program</td><td>{{ program.type_label }}{% if program.title %}: {{ program.title }}{% endif %}</td></tr>
-<tr><td class="k">Artists</td><td>{% for a in artists %}{{ a.name }}{% if a.art_form %} ({{ a.art_form }}){% endif %}{% if a.role != 'Main' %}, {{ a.role|lower }}{% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>
+<tr><td class="k">Events</td><td>{{ events|length }}</td></tr>
+</table></div>
+<table class="facts">
+<tr><th colspan="2">Program details</th></tr>
+<tr><td class="k">Artists</td><td>{% for a in artists %}{{ a.name }}{% if a.art_form %} ({{ a.art_form }}){% endif %}{% if a.role not in ('Main', 'Performer') %}, {{ a.role|lower }}{% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>
+{% if events|length == 1 %}{% set e = events[0] %}
+<tr><td class="k">Date</td><td>{{ e.date }}</td></tr>
+<tr><td class="k">Time</td><td>{{ e.time or 'To be confirmed' }}</td></tr>
+<tr><td class="k">Module</td><td>{{ e.module }}</td></tr>
+<tr><td class="k">Institution</td><td>{{ e.institution_line }}</td></tr>
+<tr><td class="k">Expected students</td><td>{{ e.audience_students or '-' }}</td></tr>
+{% endif %}
 <tr><td class="k">Coordinators</td><td>{% for c in coordinators %}{{ c.name }}{% if c.email %} ({{ c.email }}){% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>
+<tr><td class="k">Payment by Delhi A/c</td><td>{{ 'Yes' if program.payment_required else 'No' }}</td></tr>
 </table>
-<table class="grid"><tr><th>Date</th><th>Time</th><th>Module</th><th>Institution</th></tr>
-{% for e in events %}<tr><td>{{ e.date }}</td><td>{{ e.time or '-' }}</td><td>{{ e.module }}</td><td>{{ e.institution_line }}</td></tr>{% endfor %}
-</table>
+{% if events|length > 1 %}<table class="grid"><tr><th>#</th><th>Date</th><th>Time</th><th>Module</th><th>Institution</th><th>Students</th><th>Contribution</th></tr>
+{% for e in events %}<tr><td>{{ loop.index }}</td><td class="nw">{{ e.date }}</td><td>{{ e.time or '-' }}</td><td>{{ e.module }}{% if program.type == 'virasat' and e.artists %}<br><small>{{ e.artists }}</small>{% endif %}</td><td>{{ e.institution_line }}</td><td>{{ e.audience_students or '-' }}</td><td>{% if e.contribution and e.contribution != 'NIL' %}&#8377;{{ e.contribution }}{% else %}{{ e.contribution or '-' }}{% endif %}</td></tr>{% endfor %}
+</table>{% endif %}
+{% if totals.contribution_inr %}<div class="amount"><span>{% if events|length > 1 %}Total contribution from institutions{% else %}Contribution from the institution{% endif %}</span><b>&#8377;{{ totals.contribution_inr }}</b></div>{% endif %}
 {% if program.notes %}<p class="note"><b>Notes:</b> {{ program.notes }}</p>{% endif %}
-<p class="note">Filed through the {{ org.name }} APR Assistant.</p>
+<p class="attach">&#128206; <b>Attached:</b> APR {{ apr.number }} (PDF){% if has_poster %} &middot; program poster{% endif %}{% if has_calendar %} &middot; calendar invite (.ics): open it to add the {{ 'events' if calendar_events > 1 else 'event' }} to your calendar{% endif %}</p>
+<p>For any queries or changes, please contact the {{ org.name }} coordination team.</p>
+<p>Thank you for promoting Indian classical arts and culture!</p>
+<p class="sign"><strong>{{ org.name }} Team</strong><br><em>Spreading the essence of Indian heritage</em></p>
 {% endblock %}"""
 
 PAYMENT_REQUEST = """{% extends "email.shell" %}{% block content %}
 <p>{% if institution.contact_name %}Dear {{ institution.contact_name }},{% else %}Dear Sir/Madam,{% endif %}</p>
+<span class="pill">&#128591; With Our Thanks</span>
 <p>Greetings from {{ org.name }}!</p>
 <p>Thank you for partnering with us to host this programme under the {{ org.name }} movement. We hope the students and faculty enjoyed the session and that it opened a door to India's rich cultural heritage for them.</p>
-{% if feedback_url %}<p>We would love to hear how it went. If you can spare a few minutes, your feedback genuinely shapes how we plan future programmes: <a href="{{ feedback_url }}">share your feedback</a>.</p>{% endif %}
+{% if feedback_url %}<p>We would love to hear how it went. If you can spare a few minutes, your feedback genuinely shapes how we plan future programmes.</p>{% endif %}
 <table class="facts">
-<tr><td class="k">Institute</td><td>{{ institution.name }}</td></tr>
-{% for e in events %}<tr><td class="k">{{ e.date }}</td><td>{{ e.module }}{% if e.artists_text %} by {{ e.artists_text }}{% endif %}</td></tr>{% endfor %}
-{% if reference %}<tr><td class="k">Reference</td><td>{{ reference }}</td></tr>{% endif %}
+<tr><td class="k">Institute Name</td><td>{{ institution.name }}</td></tr>
+{% for e in events %}<tr><td class="k">{% if events|length > 1 %}Event {{ loop.index }}: {% endif %}Date / Type</td><td>{{ e.date }} / {{ e.module }}</td></tr>
+{% if e.artists_text %}<tr><td class="k">Artist(s) Featured</td><td>{{ e.artists_text }}</td></tr>{% endif %}{% endfor %}
+{% if reference %}<tr><td class="k">Reference No.</td><td>{{ reference }}</td></tr>{% endif %}
+{% if feedback_url %}<tr><td colspan="2"><a href="{{ feedback_url }}" style="font-weight:bold;text-decoration:none">&#128221; Share your feedback on this programme</a></td></tr>{% endif %}
 </table>
-<div class="amount"><span>Contribution towards the programme</span><b>&#8377;{{ amount_inr }}</b><span>{{ amount_words }}</span></div>
+<div class="amount"><span>Contribution towards the programme</span><b>&#8377;{{ amount_inr }}</b>{% if amount_words %}<small>{{ amount_words }}</small>{% endif %}</div>
 <p>For your records, we have enclosed the details of the contribution towards the programme, along with our bank particulars, should your office wish to process it at its convenience. Contributions from host institutions are what allow us to take artists to more schools and colleges across the country.</p>
+{% if bank and bank.account_number %}<div class="bank"><h3>&#127974; Bank particulars (NEFT / RTGS)</h3><table class="facts plain">
+<tr><td class="k">Account name</td><td>{{ bank.account_name }}</td></tr>
+<tr><td class="k">Account number</td><td>{{ bank.account_number }}</td></tr>
+<tr><td class="k">IFSC</td><td>{{ bank.ifsc }}</td></tr>
+<tr><td class="k">Bank</td><td>{{ bank.bank_name }}{% if bank.branch %}, {{ bank.branch }}{% endif %}</td></tr>
+</table></div>{% endif %}
 <p>If this has already been arranged, please do treat this note simply as an acknowledgement, with our thanks.</p>
+<p class="attach">&#128206; <b>Attached:</b> Request for Payment (PDF){% if has_poster %} &middot; programme poster{% endif %}</p>
 <p>For anything at all, we are reachable at {{ org.info_email }}.</p>
+<p>Thank you once again for your support in taking this movement forward.</p>
 """ + SIGN + "{% endblock %}"
 
 PAYMENT_REQUEST_TEXT = """{% if institution.contact_name %}Dear {{ institution.contact_name }},{% else %}Dear Sir/Madam,{% endif %}
@@ -77,8 +132,14 @@ Thank you for partnering with us to host this programme under the {{ org.name }}
 {% if feedback_url %}
 We would love to hear how it went: {{ feedback_url }}
 {% endif %}
+Institute: {{ institution.name }}
+{% for e in events %}Event: {{ e.date }} / {{ e.module }}{% if e.artists_text %} by {{ e.artists_text }}{% endif %}
+{% endfor %}{% if reference %}Reference: {{ reference }}
+{% endif %}
 Contribution towards the programme: Rs {{ amount_inr }} ({{ amount_words }}). The details and our bank particulars are attached.
-
+{% if bank and bank.account_number %}
+Bank particulars (NEFT / RTGS): {{ bank.account_name }}, A/c {{ bank.account_number }}, IFSC {{ bank.ifsc }}, {{ bank.bank_name }}{% if bank.branch %} ({{ bank.branch }}){% endif %}
+{% endif %}
 If this has already been arranged, please treat this note simply as an acknowledgement, with our thanks.
 
 For anything at all, we are reachable at {{ org.info_email }}.
@@ -90,9 +151,10 @@ Warm regards,
 
 GUIDELINES = """{% extends "email.shell" %}{% block content %}
 <p>{% if institution.contact_name %}Dear {{ institution.contact_name }},{% else %}Dear Sir/Madam,{% endif %}</p>
+<span class="pill">&#128197; Upcoming {% if events|length > 1 %}Programmes{% else %}Programme{% endif %}</span>
 <p>Greetings from {{ org.name }}! We are delighted to confirm the following {% if events|length > 1 %}programmes{% else %}programme{% endif %} at {{ institution.name }}.</p>
 <table class="grid"><tr><th>Date</th><th>Time</th><th>Programme</th><th>Artists</th></tr>
-{% for e in events %}<tr><td>{{ e.date }}</td><td>{{ e.time or 'To be confirmed' }}</td><td>{{ e.module }}</td><td>{{ e.artists_text }}</td></tr>{% endfor %}
+{% for e in events %}<tr><td class="nw">{{ e.date }}</td><td>{{ e.time or 'To be confirmed' }}</td><td>{{ e.module }}</td><td>{{ e.artists_text }}</td></tr>{% endfor %}
 </table>
 <p>To help the session run beautifully, here is a short summary of what we request from the host institution.</p>
 <div class="sop">
@@ -102,12 +164,13 @@ GUIDELINES = """{% extends "email.shell" %}{% block content %}
 <h3>During the programme</h3><ul><li>Starting on time is crucial. The programme may open with lamp lighting by the head of the institution along with the artiste.</li><li>The compere should have the artiste's bio-data, reconfirmed with them beforehand, and should check the correct sequence for introducing and felicitating the artistes.</li><li>Mobile phones switched off, minimal movement, and no flash photography. Any photography or video needs the artistes' prior consent.</li><li>A 15-minute interactive question-and-answer session closes the programme, followed by felicitation of all artistes and a vote of thanks.</li></ul>
 <h3>Hospitality and acknowledgement</h3><ul><li>Light refreshments before and/or after the concert, and breakfast or lunch for the artistes as appropriate. Students serving the artistes themselves adds a lovely touch.</li><li>Bottled water and glasses on or near the stage during the programme.</li><li>Afterwards, a Letter of Acknowledgement on institution letterhead, signed by the head of the institution, to be handed to the {{ org.name }} volunteer.</li></ul>
 </div>
-{% if has_attachment %}<p class="note">The complete guidelines are attached as a PDF.</p>{% endif %}
+{% if has_attachment %}<p class="attach">&#128206; The complete guidelines are attached as a PDF.</p>{% endif %}
 <p>Please do reach out if anything above needs discussion; we are glad to help.</p>
 """ + SIGN + "{% endblock %}"
 
 ARTIST_ACK = """{% extends "email.shell" %}{% block content %}
 <p>Dear {{ artist.name }},</p>
+<span class="pill">&#128591; With Gratitude</span>
 <p>Thank you for performing for {{ org.name }} at {{ event.institution }}. Sharing your art with students is what this movement exists for, and we are grateful you gave your time and music to them.</p>
 <table class="facts">
 <tr><td class="k">Programme</td><td>{{ event.module }}</td></tr>
@@ -154,13 +217,31 @@ LOGIN_CODE = """{% extends "email.shell" %}{% block content %}
 {% endblock %}"""
 
 APR_BATCH = """{% extends "email.shell" %}{% block content %}
-<p>Dear {{ coordinator.name or 'Coordinator' }},</p>
+<p>Namaste{% if coordinator.name %} {{ coordinator.name }} ji{% endif %},</p>
+<span class="pill">&#9989; {{ aprs|length }} APR{{ 's' if aprs|length != 1 else '' }} Filed</span>
 <p>{{ aprs|length }} Artist Payment Request{{ 's' if aprs|length != 1 else '' }} {{ 'were' if aprs|length != 1 else 'was' }} filed together through the APR Assistant. The APR documents are attached.</p>
 <table class="grid"><tr><th>APR</th><th>Program</th><th>Dates</th><th>Institutions</th></tr>
-{% for a in aprs %}<tr><td>{{ a.number }}</td><td>{{ a.program }}</td><td>{{ a.dates }}</td><td>{{ a.institutions }}</td></tr>{% endfor %}
+{% for a in aprs %}<tr><td><b>{{ a.number }}</b></td><td>{{ a.program }}</td><td>{{ a.dates }}</td><td>{{ a.institutions }}</td></tr>{% endfor %}
 </table>
 {% if pending %}<p class="note">Still to file: {{ pending }}.</p>{% endif %}
-<p class="note">Filed through the {{ org.name }} APR Assistant.</p>
+<p>Thank you for promoting Indian classical arts and culture!</p>
+<p class="sign"><strong>{{ org.name }} Team</strong><br><em>Spreading the essence of Indian heritage</em></p>
+{% endblock %}"""
+
+# Sent when the poster is made after the APR email has already gone, so it can still travel with the APR.
+APR_POSTER = """{% extends "email.shell" %}{% block content %}
+<p>Namaste{% if coordinator.name %} {{ coordinator.name }} ji{% endif %},</p>
+<span class="pill">&#127912; Program Poster</span>
+<p>The poster for APR {{ apr.number }} is ready. It is attached here together with the APR document, so both stay together in your records.</p>
+<table class="facts">
+<tr><td class="k">APR No.</td><td><b>{{ apr.number }}</b></td></tr>
+<tr><td class="k">Program</td><td>{{ program.type_label }}{% if program.title %}: {{ program.title }}{% endif %}</td></tr>
+<tr><td class="k">Artists</td><td>{% for a in artists %}{{ a.name }}{% if a.art_form %} ({{ a.art_form }}){% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>
+<tr><td class="k">{{ 'Events' if events|length > 1 else 'Event' }}</td><td>{% for e in events %}{{ e.date }}{% if e.time %}, {{ e.time }}{% endif %}: {{ e.institution_line }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>
+</table>
+<p class="attach">&#128206; <b>Attached:</b> program poster &middot; APR {{ apr.number }} (PDF)</p>
+<p>Thank you for promoting Indian classical arts and culture!</p>
+<p class="sign"><strong>{{ org.name }} Team</strong><br><em>Spreading the essence of Indian heritage</em></p>
 {% endblock %}"""
 
 HOUSE_RULES = """- Many coordinators are volunteers: be warm, respectful and patient, like a helpful colleague.
@@ -241,11 +322,18 @@ def _email(title, subject, body, placeholders, text=None):
 DEFAULT_TEMPLATES = {
     'email.shell': {'kind': 'email_layout', 'title': 'Email frame (header and footer)', 'subject': None, 'body': SHELL,
                     'meta': {'placeholders': ['org.name', 'org.tagline', 'org.website', 'org.website_short', 'org.info_email']}},
-    'email.apr_confirmation': _email('APR filed (to coordinators and finance)', 'APR {{ apr.number }} filed: {{ program.title or events[0].institution }}',
-                                     APR_CONFIRMATION, ['coordinator.name', 'apr.number', 'program.type_label', 'program.title', 'program.notes', 'artists', 'events', 'coordinators']),
+    'email.apr_confirmation': _email('APR filed (to coordinators and finance)',
+                                     '{{ org.name }} APR {{ apr.number }} Confirmation – {% if program.title %}{{ program.title }}{% elif events %}'
+                                     '{{ events[0].artists_text }}{% if events[0].artists_text %} at {% endif %}{{ events[0].institution_line }}{% endif %}',
+                                     APR_CONFIRMATION, ['coordinator.name', 'apr.number', 'program.type_label', 'program.title', 'program.notes', 'artists',
+                                                        'events', 'coordinators', 'has_poster', 'has_calendar']),
+    'email.apr_poster': _email('Poster for a filed APR (to coordinators and finance)',
+                               '{{ org.name }} APR {{ apr.number }}: program poster{% if events %} – {{ events[0].institution_line }}{% endif %}',
+                               APR_POSTER, ['coordinator.name', 'apr.number', 'program.type_label', 'artists', 'events']),
     'email.payment_request': _email('Request for Payment (to the institution)',
                                     'Thank You — Programme Feedback & Contribution Details – {{ org.name }} ({{ institution.name }})',
-                                    PAYMENT_REQUEST, ['institution.name', 'institution.contact_name', 'events', 'amount_inr', 'amount_words', 'reference', 'feedback_url', 'coordinator.name'],
+                                    PAYMENT_REQUEST, ['institution.name', 'institution.contact_name', 'events', 'amount_inr', 'amount_words', 'reference',
+                                                      'feedback_url', 'coordinator.name', 'bank', 'has_poster'],
                                     text=PAYMENT_REQUEST_TEXT),
     'email.pre_event_guidelines': _email('Pre-event guidelines (to the institution)',
                                          '{{ org.name }} Programme Confirmation & Pre-Event Guidelines — {{ institution.name }}',
@@ -321,7 +409,7 @@ def sample_context(org: dict, kind: str = 'circuit') -> dict:
         'generated_at': '24-Feb-2026 03:54pm',
         'institution': {'name': 'DPS Nashik', 'contact_name': 'Mrs. Kulkarni', 'email': 'principal@dpsnashik.in', 'city': 'Nashik'},
         'amount': 10000, 'amount_inr': '10,000', 'amount_words': 'Rupees Ten Thousand Only', 'reference': 'APR 1777',
-        'feedback_url': '', 'has_attachment': True, 'has_poster': True,
+        'feedback_url': '', 'has_attachment': True, 'has_poster': True, 'has_calendar': True, 'calendar_events': 2, 'year': 2026,
         'artist': {'name': 'Ronu Majumdar', 'art_form': 'Flute', 'role': 'Main', 'city': 'Mumbai', 'state': 'Maharashtra',
                    'email': 'artist@example.com', 'phone': ''},
         'event': {'module': 'Lecture Demonstration', 'institution': 'DPS Nashik', 'date': '16 Feb 2026'},
@@ -339,6 +427,10 @@ def sample_context(org: dict, kind: str = 'circuit') -> dict:
 # Earlier default wordings: when the stored template is still exactly one of these (nobody edited it), the
 # current default replaces it as a new version on startup. An administrator's own wording is never touched.
 SUPERSEDED_DEFAULTS = {'prompt.house_rules': [""" + repr(old_rules) + """]}
+# v2.0-v2.3 emails: the red-banner look gives way to the earlier app's gold design (and a cleaner APR subject).
+from app.core.template_history import V23 as _V23           # noqa: E402
+for _k, _body in _V23.items():
+    SUPERSEDED_DEFAULTS.setdefault(_k, []).append(_body)
 
 
 DEFAULT_TEMPLATES['doc.event_guidelines'] = {

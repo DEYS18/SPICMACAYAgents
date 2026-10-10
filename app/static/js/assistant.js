@@ -58,10 +58,17 @@
     return html + (list ? '</' + list + '>' : '');
   }
   const inr = n => Number(n).toLocaleString('en-IN');
+  const listText = xs => xs.length < 2 ? (xs[0] || '') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
   const t12 = hhmm => { if (!hhmm) return ''; const [h, m] = hhmm.split(':').map(Number); return ((h % 12) || 12) + ':' + String(m).padStart(2, '0') + (h < 12 ? ' am' : ' pm'); };
   const timeText = (a, b) => a ? t12(a) + (b ? ' - ' + t12(b) : '') : '';
 
-  function scrollEnd() { requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; }); }
+  let scrollQueued = false;
+  function scrollEnd(force) {
+    const near = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 160;
+    if ((!force && !near && !S.follow) || scrollQueued) return;
+    scrollQueued = true;
+    requestAnimationFrame(() => { scrollQueued = false; msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'auto' }); });
+  }
   function leaveWelcome() {
     if (!document.body.classList.contains('is-empty')) return;
     document.body.classList.remove('is-empty');
@@ -74,13 +81,19 @@
     const n = el('div', { class: 'msg ' + role });
     if (role === 'assistant') n.innerHTML = md(text); else n.textContent = text;
     msgs.append(n);
-    scrollEnd();
+    scrollEnd(role === 'user');
     return n;
   }
+  // A steady, fixed-height indicator (see assistant.css): the conversation above it never moves while it runs.
   let typingNode = null;
   function typing(on) {
-    if (on && !typingNode) { typingNode = el('div', { class: 'msg assistant typing' }, el('span', {}, 'Working on it')); msgs.append(typingNode); scrollEnd(); }
+    if (on && !typingNode) {
+      typingNode = el('div', { class: 'msg assistant typing', role: 'status' },
+        el('span', { class: 'typing-dots', 'aria-hidden': 'true' }, el('i'), el('i'), el('i')), el('span', { class: 'typing-text' }, 'Working on it'));
+      msgs.append(typingNode); S.follow = true; scrollEnd(true);
+    }
     if (!on && typingNode) { typingNode.remove(); typingNode = null; }
+    face(on ? 'thinking' : 'idle');
   }
   let toastTimer = 0;
   function toast(text) {
@@ -101,6 +114,7 @@
     const actionable = ((r.ui || {}).cards || []).some(c => ['review', 'outbox', 'batch_plan', 'rfp_picker', 'bank_proposal', 'upload'].includes(c.type));
     renderChips(actionable ? [] : (r.suggestions || []).slice(0, 3));
     if (r.draft) { S.draft = r.draft; S.issues = r.issues || []; S.progress = r.progress; renderDraft(); }
+    S.follow = false;
     if ((!opts || opts.speak !== false) && r.reply) speakReply(r.reply);
   }
   async function send(text) {
@@ -130,7 +144,7 @@
     (ui.candidates || []).forEach(renderCandidates);
     (ui.cards || []).forEach(renderCard);
     (ui.artifacts || []).forEach(renderArtifact);
-    if (!S.keepScroll || (ui.artifacts || []).length || (ui.candidates || []).length) scrollEnd();
+    if (!S.keepScroll || (ui.artifacts || []).length || (ui.candidates || []).length) scrollEnd(S.follow);
   }
   function renderCandidates(g) {
     const row = el('div', { class: 'cand-row' });
@@ -170,7 +184,8 @@
     if (c.type === 'batch_results') return renderBatchResults(c);
     if (c.type === 'rfp_picker') return renderRfpPicker(c);
     if (c.type === 'review') {
-      card(c.title, [el('div', { html: md(c.summary) }), (c.warnings || []).length ? el('ul', { class: 'warnings' }, c.warnings.map(w => el('li', {}, w))) : null],
+      const sends = (c.sends || []).length ? el('p', { class: 'muted sends' }, 'The APR email will carry ' + listText(c.sends) + '.') : null;
+      card(c.title, [el('div', { html: md(c.summary) }), (c.warnings || []).length ? el('ul', { class: 'warnings' }, c.warnings.map(w => el('li', {}, w))) : null, sends],
         [el('button', { class: 'btn ghost small', type: 'button', onclick: () => runTool('preview_apr_pdf', {}, 'Preview PDF') }, 'Preview PDF'),
          el('button', { class: 'btn primary', type: 'button', onclick: once(() => action('confirm', { confirmation_id: c.confirmation_id }, S.aiReady)) }, c.button || 'File APR')]);
     } else if (c.type === 'outbox') {
@@ -389,6 +404,7 @@
   function renderDraft() {
     const d = S.draft;
     if (!d) return;
+    renderGlance();
     const p = S.progress || { done: 0, total: 6, ready: false };
     const pct = Math.round(100 * p.done / (p.total || 1));
     const o = d.outputs || {};
@@ -587,7 +603,10 @@
       base: BASE, language: () => prefs.lang,
       serverSTT: () => !!S.voiceCaps.server_stt, serverTTS: () => !!S.voiceCaps.server_tts,
       onLevel: lv => mic.style.setProperty('--level', lv.toFixed(3)),
+      onSpeakStart: info => { if (AV) { AV.startSpeaking(info); showFaceState('speaking'); } },
+      onSpeakEnd: () => { if (AV && AV.state === 'speaking') { AV.stopSpeaking(); showFaceState(S.busy ? 'thinking' : 'idle'); if (S.busy) AV.setState('thinking'); } },
       onState: st => {
+        face(st === 'recording' ? 'listening' : st === 'processing' ? 'thinking' : (S.busy ? 'thinking' : 'idle'));
         mic.classList.toggle('recording', st === 'recording');
         mic.classList.toggle('busy', st === 'processing');
         vs.hidden = st === 'idle';
@@ -629,9 +648,84 @@
     });
   }
 
+  // ── the assistant's face ────────────────────────────────────────────────
+  const AV = window.SMAvatar;
+  const FACE_TEXT = { idle: 'Ready when you are', listening: 'Listening', thinking: 'Working on it', speaking: 'Speaking' };
+  function face(st) {
+    if (!AV) return;
+    if (AV.state === 'speaking' && st !== 'speaking') return;      // a reply being read aloud keeps the face speaking
+    AV.setState(st);
+    showFaceState(st);
+  }
+  function showFaceState(st) {
+    const rail = $('#host-rail');
+    if (rail) rail.dataset.state = st;
+    const t = $('#host-status-text');
+    if (t) t.textContent = FACE_TEXT[st] + (st === 'idle' ? '' : '…');
+    const stop = $('#host-stop');
+    if (stop) stop.hidden = st !== 'speaking';
+    const chip = $('#speak-chip');
+    if (chip) chip.hidden = st !== 'speaking';
+  }
+  function setupFace() {
+    if (!AV) return;
+    AV.mount($('#host-face'), { bow: true });
+    AV.mount($('#speak-face'));
+    const stop = () => { if (S.voice) S.voice.stopSpeaking(); };
+    $('#host-stop').addEventListener('click', stop);
+    $('#speak-stop').addEventListener('click', stop);
+    const say = $('#say-list');
+    SAY.forEach(t => say.append(el('li', {}, el('button', { type: 'button', onclick: () => { input.value = t; autosize(); input.focus(); } }, t))));
+  }
+  const SAY = ['Concert by Pt. Ronu Majumdar at IIT Bombay on 15 November, 6 pm, contribution Rs 25,000',
+    'सर्किट: विदुषी उमा डोगरा, पुणे के तीन स्कूल, 4 से 6 दिसंबर', 'Send the Request for Payment for APR 208',
+    'Which programs still have payments pending?'];
+
+  // ── this program at a glance (laptop): what the coordinator has said so far, read-only ──
+  function renderGlance() {
+    const box = $('#program-glance');
+    if (!box) return;
+    const d = S.draft, p = S.progress || { done: 0, total: 6 };
+    box.innerHTML = '';
+    const started = d && (d.program_type || d.main_artist || (d.events || []).length || (d.accompanying || []).length || (d.outputs || {}).apr);
+    const pct = Math.round(100 * p.done / (p.total || 1));
+    box.append(el('div', { class: 'glance-head' }, el('h2', {}, 'This program'),
+      started ? el('span', { class: 'ring', style: '--p:' + pct, title: p.done + ' of ' + p.total + ' essentials done' }, el('b', {}, p.done + '/' + p.total)) : null));
+    if (!started) {
+      box.append(el('p', { class: 'glance-empty' }, 'As we talk, the program comes together here: the artists, the dates and institutions, and anything still missing. Nothing is filed until you say so.'));
+      return;
+    }
+    const o = d.outputs || {};
+    box.append(el('p', { class: 'glance-type' }, [TYPE_LABEL[d.program_type] || 'Program type not chosen yet', d.title].filter(Boolean).join(': ')));
+    const sec = (title, ...kids) => el('div', { class: 'glance-sec' }, el('h3', {}, title), kids);
+    const people = [d.main_artist].concat(d.accompanying || []).filter(Boolean);
+    if (people.length) box.append(sec('Artists', people.map(a => el('p', {}, a.name,
+      el('small', {}, [a.art_form, a.role === 'main' ? 'main artist' : 'accompanying', a.provisional ? 'provisional' : ''].filter(Boolean).join(', '),
+        a.role === 'main' && a.has_photo ? el('span', { class: 'ok' }, ', photo on file') : null)))));
+    if ((d.events || []).length) box.append(sec(d.events.length > 1 ? (d.program_type === 'circuit' ? 'Circuit stops' : 'Events') : 'Event', d.events.map(e => el('div', { class: 'glance-ev' },
+      el('p', {}, [e.date_display || 'Date to come', timeText(e.start_time || d.start_time, e.end_time || d.end_time)].filter(Boolean).join(', ')),
+      el('small', {}, [[e.institution_name, e.city].filter(Boolean).join(', ') || 'Institution to come',
+        e.contribution === 'NIL' ? 'no contribution' : e.contribution != null ? 'Rs ' + inr(e.contribution) : ''].filter(Boolean).join('; '))))));
+    if ((d.coordinators || []).length) box.append(sec('Coordinators', el('p', {}, d.coordinators.map(c => c.name || c.email).join(', '))));
+    const req = (S.issues || []).filter(x => x.severity === 'required');
+    if (req.length && !o.apr) box.append(sec('Still needed', el('ul', { class: 'glance-need' }, req.slice(0, 4).map(x => el('li', {}, x.message)))));
+    if (o.apr || (o.posters || []).length) {
+      const out = el('div', { class: 'glance-out' });
+      if (o.apr) out.append(el('a', { class: 'doc-link', href: o.apr.pdf_url, target: '_blank', rel: 'noopener' }, 'APR ' + o.apr.number + ' (PDF)'));
+      (o.posters || []).slice(-3).forEach((x, k) => out.append(el('a', { href: x.url, target: '_blank', rel: 'noopener', title: 'Poster ' + (k + 1) },
+        el('img', { src: x.url, alt: 'Poster ' + (k + 1), loading: 'lazy' }))));
+      const sent = (o.emails || []).filter(x => x.ok).length;
+      box.append(sec('Done', out, sent ? el('small', {}, sent + ' email' + (sent > 1 ? 's' : '') + ' sent or saved') : null,
+        o.apr && o.apr.has_poster ? el('small', {}, 'The poster went with the APR email.') : null));
+    }
+    box.append(el('button', { class: 'btn ghost glance-edit', type: 'button', onclick: () => $('#draft-pill').click() }, 'Check or change the details'));
+  }
+
   // ── boot ────────────────────────────────────────────────────────────────
   function renderWelcome(w) {
-    msgs.append(el('section', { class: 'welcome', id: 'welcome' }, el('h2', {}, w.title || 'Namaste'), w.text ? el('p', {}, w.text) : null));
+    const wf = el('div', { class: 'welcome-face' });
+    msgs.append(el('section', { class: 'welcome', id: 'welcome' }, wf, el('h2', {}, w.title || 'Namaste'), w.text ? el('p', {}, w.text) : null));
+    if (AV && getComputedStyle(wf).display !== 'none') AV.mount(wf, { bow: true });
   }
   // The original assistant greeted coordinators aloud as the screen opened. Browsers may keep a page silent until the
   // first tap: then a small "Tap to hear the welcome" button appears, so the spoken welcome is never lost.
@@ -672,10 +766,13 @@
   }
   function renderRecent(list) {
     $('#recent-wrap').hidden = !list.length;
-    const ul = $('#recent');
-    ul.innerHTML = '';
-    list.forEach(c => ul.append(el('li', {}, el('button', { type: 'button', onclick: async () => { try { boot(await api('/start', { resume_id: c.id, language: prefs.lang })); } catch (e) { toast(e.message); } } },
-      el('strong', {}, c.title), el('span', {}, [TYPE_LABEL[c.program_type], c.events ? c.events + ' event(s)' : '', c.apr ? 'APR ' + c.apr : ''].filter(Boolean).join(', '))))));
+    const rw = $('#rail-recent-wrap');
+    if (rw) rw.hidden = !list.length;
+    [$('#recent'), $('#rail-recent')].filter(Boolean).forEach(ul => {
+      ul.innerHTML = '';
+      list.slice(0, ul.id === 'rail-recent' ? 5 : 20).forEach(c => ul.append(el('li', {}, el('button', { type: 'button', onclick: async () => { try { boot(await api('/start', { resume_id: c.id, language: prefs.lang })); } catch (e) { toast(e.message); } } },
+        el('strong', {}, c.title), el('span', {}, [TYPE_LABEL[c.program_type], c.events ? c.events + ' event(s)' : '', c.apr ? 'APR ' + c.apr : ''].filter(Boolean).join(', '))))));
+    });
   }
   function startRecipe(rc) { addMsg('user', rc.label); action('start_recipe', { key: rc.key }, true); }
   function boot(r) {
@@ -688,10 +785,11 @@
     else { renderWelcome(r.welcome || { title: 'Namaste', text: r.reply || '' }); speakWelcome(r.welcome); }
     renderRecent(r.recent || []);
     renderTurn(Object.assign({}, r, { reply: null }), { speak: false });
+    renderGlance();
     if (fresh) renderStarters();
   }
   async function init() {
-    setupComposer(); setupMenu(); setupSheet(); setupDrop(); setupVoice(); setupSpeaker();
+    setupComposer(); setupMenu(); setupSheet(); setupDrop(); setupFace(); setupVoice(); setupSpeaker();
     try { boot(await api('/start', { language: prefs.lang })); } catch (e) { toast(e.message); }
   }
   init();
